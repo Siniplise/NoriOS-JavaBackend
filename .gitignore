@@ -27,3 +27,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# golden 录制产物：含真实对话、记忆、音频，绝不入库
+golden/
+tools/golden/node_modules/
