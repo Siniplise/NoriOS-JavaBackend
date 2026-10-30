@@ -71,12 +71,18 @@ dependencies {
     implementation(libs.netty.codec.http)
     implementation(libs.netty.handler)
 
-    // 日志：业务代码只见 slf4j-api；logback 只在 obs.logging 的两个自定义转换器里用到，
-    // 所以用 compileOnly（编译期可见）+ runtimeOnly（运行时实现），不让它会漏进业务包的 import。
+    // 日志：业务代码用 slf4j-api；Log4j2 是底座（obs.logging 的自定义转换器直接用它的 API）。
+    // log4j-slf4j2-impl 是 slf4j → log4j2 的 binding，只放运行时，避免业务代码依赖它。
     implementation(libs.slf4j.api)
-    compileOnly(libs.logback.classic)
-    runtimeOnly(libs.logback.classic)
-    testImplementation(libs.logback.classic)
+    implementation(platform(libs.log4j.bom))
+    implementation(libs.log4j.api)
+    implementation(libs.log4j.core)
+    // 注解处理器生成 META-INF/Log4j2Plugins.dat：让 %LVL4 这类自定义插件在启动时就能被发现，
+    // 不必依赖运行期扫包（log4j2.xml 里的 packages 属性只是第二道保险）。
+    // 注意 platform 要单独给它：annotationProcessor 不继承 implementation 的 BOM，否则版本解析不到。
+    annotationProcessor(platform(libs.log4j.bom))
+    annotationProcessor(libs.log4j.core)
+    runtimeOnly(libs.log4j.slf4j2.impl)
 
     // 持久化：HANDOFF §7.1 定的是 SQLite(WAL) 起步（记忆/存档/beat 状态落库）
     implementation(libs.sqlite.jdbc)
@@ -92,6 +98,11 @@ tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     // -Xlint:all 把「可能有问题」的地方提前暴露；-processing 关掉注解处理器告警噪音
     options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-serial", "-Xlint:-processing"))
+    // log4j-core 的注解处理器会检查 GraalVM 元数据参数，不填就刷警告
+    options.compilerArgs.addAll(listOf(
+        "-Alog4j.graalvm.groupId=net.siniplise.noriosbackend",
+        "-Alog4j.graalvm.artifactId=nori-backend",
+    ))
 }
 
 tasks.withType<Test>().configureEach {

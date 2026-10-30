@@ -1,28 +1,53 @@
 package net.siniplise.noriosbackend.obs.logging;
 
-import ch.qos.logback.classic.pattern.ClassicConverter;
-import ch.qos.logback.classic.spi.ILoggingEvent;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.Marker;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.config.plugins.Plugin;
+import org.apache.logging.log4j.core.pattern.ConverterKeys;
+import org.apache.logging.log4j.core.pattern.LogEventPatternConverter;
 
 /**
- * 把日志级别压成<b>固定四个字符</b>，供 logback pattern 里的 {@code %lvl4} 使用。
+ * {@code %LVL4}：把级别渲染成<b>固定四个字符</b>。
  *
- * <p>为什么不用现成的 {@code %.4level}：它只会从左边截断，DEBUG 变 {@code DEBU}、
- * ERROR 变 {@code ERRO}，既不好认也不符合本项目约定。这里的映射是：
+ * <p>Log4j2 自带的 {@code %level} / {@code %-5level} 只能补空格或截断，
+ * {@code DEBUG} 出来是 {@code DEBUG} 或 {@code DEBU}，给不出本项目约定的 {@code DEBG}。
+ * 所以写一个插件转换器：
  *
  * <pre>
  * TRACE → TRCE      DEBUG → DEBG      INFO  → INFO
  * WARN  → WARN      ERROR → EROR      FATAL → CRTL
  * </pre>
  *
- * <p>四个字符的好处是终端里列能对齐，扫一眼就能抓到 EROR 那一行。
- * 未登记的级别一律「取前四位 + 空格补齐」，保证长度仍是 4，绝不会把对齐搞乱。
+ * <p>四个字符的好处是终端里能按列扫读，grep {@code EROR} 也不会误伤。
+ * 未登记的级别一律「截前四位 + 空格补齐」，长度恒为 4，不破坏对齐。
+ *
+ * <h2>CRTL 有两条来源（Log4j2 比 logback 好的地方）</h2>
+ * <ol>
+ *   <li><b>原生 FATAL</b>：Log4j2 有 FATAL 级别，{@code log.fatal(...)} 直接就是 CRTL；</li>
+ *   <li><b>ERROR + {@link Critical#CRITICAL} 标记</b>：业务代码走 slf4j API（没有 fatal 方法），
+ *       用标记表达「这条要人立刻处理」。</li>
+ * </ol>
+ *
+ * <p>插件在这里靠 {@code log4j2.xml} 的 {@code packages="net.siniplise.noriosbackend.obs.logging"}
+ * 扫出来（运行时扫描），不依赖注解处理器生成 plugin cache。
  */
-public class ShortLevelConverter extends ClassicConverter {
+@Plugin(name = "NoriShortLevelConverter", category = "Converter")
+@ConverterKeys({"LVL4"})
+public final class ShortLevelConverter extends LogEventPatternConverter {
 
-    /** 严重标记的名字，与 {@link Critical#CRITICAL} 必须一致。 */
-    public static final String CRITICAL_MARKER_NAME = "NORI_CRITICAL";
+    private static final ShortLevelConverter INSTANCE = new ShortLevelConverter();
 
-    /** 日志级别在终端里的四字符写法。 */
+    private ShortLevelConverter() {
+        super("LVL4", "level");
+    }
+
+    /** Log4j2 通过反射找这个工厂方法。 */
+    public static ShortLevelConverter newInstance(final String[] options) {
+        return INSTANCE;
+    }
+
+    /** 级别名 → 四字符写法（纯函数，方便单测）。 */
     public static String abbreviate(String levelName) {
         if (levelName == null || levelName.isEmpty()) {
             return "????";
@@ -38,6 +63,15 @@ public class ShortLevelConverter extends ClassicConverter {
         };
     }
 
+    /** 渲染一个事件：FATAL，或「ERROR + 严重标记」，都出 CRTL。 */
+    public static String render(Level level, Marker marker) {
+        boolean marked = marker != null && Critical.MARKER_NAME.equals(marker.getName());
+        if (marked && level == Level.ERROR) {
+            return "CRTL";
+        }
+        return abbreviate(level.name());
+    }
+
     private static String pad(String name) {
         String upper = name.toUpperCase(java.util.Locale.ROOT);
         if (upper.length() >= 4) {
@@ -47,25 +81,7 @@ public class ShortLevelConverter extends ClassicConverter {
     }
 
     @Override
-    public String convert(ILoggingEvent event) {
-        // ERROR + NORI_CRITICAL 标记 ⇒ CRTL。logback 没有 FATAL，这是 CRTL 的唯一来源。
-        if (event.getLevel() == ch.qos.logback.classic.Level.ERROR && isCritical(event)) {
-            return "CRTL";
-        }
-        return abbreviate(event.getLevel().toString());
-    }
-
-    private static boolean isCritical(ILoggingEvent event) {
-        // 用 getMarkerList()：logback 1.5 起 getMarker() 与 Marker.contains(String) 都已过时
-        var markers = event.getMarkerList();
-        if (markers == null) {
-            return false;
-        }
-        for (var marker : markers) {
-            if (CRITICAL_MARKER_NAME.equals(marker.getName())) {
-                return true;
-            }
-        }
-        return false;
+    public void format(LogEvent event, StringBuilder toAppendTo) {
+        toAppendTo.append(render(event.getLevel(), event.getMarker()));
     }
 }

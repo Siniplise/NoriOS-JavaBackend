@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  日志格式约定（2026-10-30 用户定，Log4j2 版）：
+
+    10-30 21:20:03.451 INFO  [main] app.NoriBackendApplication:66 - 消息
+    10-30 21:20:03.452 CRTL  [main] logging.LogFormatDemo:35 - 存档写坏
+    java.lang.IllegalStateException: checksum mismatch
+        at net.siniplise.noriosbackend...
+
+  · %LVL4    —— 固定四字符 TRCE/DEBG/INFO/WARN/EROR/CRTL（自定义插件，见 ShortLevelConverter）
+  · %logger{2} —— 只留「上一级包 + 类名」，省略 net.siniplise.noriosbackend 前缀（Log4j2 内置能力，
+                  比自己在代码里截短更省事；准确语义由 LogFormatTest 钉住）
+  · %line    —— 行号，能直接点进 IDE
+  · %ex      —— Exception 全量堆栈，消息行之后另起
+  · %thread  —— 虚拟线程名有信息量（nori-loop-xxx），保留
+
+  packages 属性是给自定义插件用的：Log4j2 会扫这个包找 @Plugin，
+  所以不需要注解处理器生成 plugin cache。
+-->
+<Configuration status="WARN" packages="net.siniplise.noriosbackend.obs.logging">
+
+    <Appenders>
+        <Console name="CONSOLE" target="SYSTEM_OUT">
+            <PatternLayout charset="UTF-8"
+                           pattern="%d{MM-dd HH:mm:ss.SSS} %LVL4 [%thread] %logger{2}:%line - %msg%n%ex"/>
+        </Console>
+    </Appenders>
+
+    <Loggers>
+        <Root level="INFO">
+            <AppenderRef ref="CONSOLE"/>
+        </Root>
+    </Loggers>
+
+</Configuration>

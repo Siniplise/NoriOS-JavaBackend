@@ -55,18 +55,20 @@
 - **未定**：HTTP/WS 框架（Netty 原生 vs Spring Boot 4 + WebFlux）。HANDOFF 建议的 Boot 3 **不支持 Java 25**，若要 Boot 必须上 4.x。
 - **范围已扩**（2026-10-30 用户定）：不是只换 4173，而是整体后端 —— 含三层记忆、存档、25503 人格、TTS，多线程 + 子线程通信。
 
-## 日志约定（2026-10-30 用户定）
+## 日志约定（2026-10-30 用户定 · 底座 Log4j2 2.26.1）
 
-- 格式（`resources/logback.xml`）：`%d{MM-dd HH:mm:ss.SSS} %lvl4 [%thread] %logger4:%line - %msg%n%ex`
-  实际样子：`10-30 21:11:58.726 CRTL [main] logging.LogFormatDemo:35 - 消息` + 下一行起是堆栈。
-- **级别恒四字符**：TRCE / DEBG / INFO / WARN / EROR / CRTL。`%.4level` 只会截成 DEBU/ERRO，做不到，必须自定义转换器。
-- **logger 只留「上一级包.类名」**：`%logger{0}` 会重名、全量包名（27 字符）挤掉半行，取最后一级包名是折中。
-- **CRTL 的来源**：logback 1.5 没有 FATAL，用 `log.error(Critical.CRITICAL, ...)` 的 Marker 表达。
+- 格式（`resources/log4j2.xml`）：`%d{MM-dd HH:mm:ss.SSS} %LVL4 [%thread] %logger{2}:%line - %msg%n%ex`
+  实际样子：`10-30 21:21:35.091 CRTL [main] logging.LogFormatDemo:35 - 消息` + 下一行起是堆栈。
+- **级别恒四字符**：TRCE / DEBG / INFO / WARN / EROR / CRTL。`%.4level`、`%-5level` 都做不到，必须是自定义插件。
+- **logger 用 Log4j2 内置的 `%logger{2}`**（上一级包 + 类名），不再自己写截短转换器；语义由 LogFormatTest 钉住。
+- **`%lvl4` 这个键名不能用**：Log4j2 把 `%l` 解析成内置的「行号」缩写，渲染出 `vl4`。所以键名取 `%LVL4`（大写、不撞别名）。
+- **CRTL 两条来源**：① 原生 FATAL（`log.fatal(...)`，Log4j2 有）；② `log.error(Critical.CRITICAL, ...)` 的 slf4j Marker。
   **不要用 MDC + 辅助方法包一层**——多一层栈会把 `%line` 指到辅助类里，排查时最有用的一行就丢了。
-- logback 1.5 的坑：`conversionRule` 属性名是 `class`（写 `converterClass` 会 deprecation 刷屏）；
-  `ILoggingEvent.getMarker()`、`Marker.contains(String)` 已过时，用 `getMarkerList()` + `getName()`。
-- 依赖：logback-classic 是 `compileOnly + runtimeOnly`（只有 obs.logging 的转换器需要），业务包只见 slf4j-api。
-- 自检：`gradlew run --args="--demo-log"` 打五种级别 + 一条带堆栈的异常。
+- 自定义插件注册：`annotationProcessor(log4j-core)` 生成 `META-INF/Log4j2Plugins.dat`（ApT）+ `log4j2.xml` 的 `packages=` 扫包兜底。
+  **坑**：`annotationProcessor` 不继承 `implementation` 的 BOM，必须单独写 `annotationProcessor(platform(log4j-bom))`，否则版本解析成空。
+- 还要给编译器两个 `-A` 参数（`log4j.graalvm.groupId/artifactId`），否则 log4j-core 的注解处理器刷警告。
+- 依赖：`slf4j-api` + `log4j-api` + `log4j-core` 是 implementation，`log4j-slf4j2-impl` 只在 runtimeOnly（binding）。
+- 自检：`gradlew run --args="--demo-log"` 打五种级别 + 原生 FATAL + 一条带堆栈的异常。
 
 ## 代码纪律（来自 HANDOFF §6，换语言也要保留）
 

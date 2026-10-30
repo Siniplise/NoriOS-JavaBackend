@@ -5,7 +5,7 @@
 junit = "5.14.4"
 assertj = "3.27.7"
 slf4j = "2.0.20"
-logback = "1.5.38"
+log4j = "2.26.1"
 netty = "4.2.19.Final"
 jackson = "2.22.4"
 sqlite = "3.54.1.0"
@@ -18,8 +18,12 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
 # 日志（obs 模块统一出入口）
+# 2026-10-30 从 logback 换成 Log4j2：原生 FATAL 级别 + 可插拔 AsyncLogger（Disruptor）
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
-logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+log4j-bom = { module = "org.apache.logging.log4j:log4j-bom", version.ref = "log4j" }
+log4j-api = { module = "org.apache.logging.log4j:log4j-api" }
+log4j-core = { module = "org.apache.logging.log4j:log4j-core" }
+log4j-slf4j2-impl = { module = "org.apache.logging.log4j:log4j-slf4j2-impl" }
 
 # HTTP / WS（gateway 的零拷贝转发、tts/persona 的上游客户端）
 netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
