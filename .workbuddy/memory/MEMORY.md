@@ -55,6 +55,19 @@
 - **未定**：HTTP/WS 框架（Netty 原生 vs Spring Boot 4 + WebFlux）。HANDOFF 建议的 Boot 3 **不支持 Java 25**，若要 Boot 必须上 4.x。
 - **范围已扩**（2026-10-30 用户定）：不是只换 4173，而是整体后端 —— 含三层记忆、存档、25503 人格、TTS，多线程 + 子线程通信。
 
+## 日志约定（2026-10-30 用户定）
+
+- 格式（`resources/logback.xml`）：`%d{MM-dd HH:mm:ss.SSS} %lvl4 [%thread] %logger4:%line - %msg%n%ex`
+  实际样子：`10-30 21:11:58.726 CRTL [main] logging.LogFormatDemo:35 - 消息` + 下一行起是堆栈。
+- **级别恒四字符**：TRCE / DEBG / INFO / WARN / EROR / CRTL。`%.4level` 只会截成 DEBU/ERRO，做不到，必须自定义转换器。
+- **logger 只留「上一级包.类名」**：`%logger{0}` 会重名、全量包名（27 字符）挤掉半行，取最后一级包名是折中。
+- **CRTL 的来源**：logback 1.5 没有 FATAL，用 `log.error(Critical.CRITICAL, ...)` 的 Marker 表达。
+  **不要用 MDC + 辅助方法包一层**——多一层栈会把 `%line` 指到辅助类里，排查时最有用的一行就丢了。
+- logback 1.5 的坑：`conversionRule` 属性名是 `class`（写 `converterClass` 会 deprecation 刷屏）；
+  `ILoggingEvent.getMarker()`、`Marker.contains(String)` 已过时，用 `getMarkerList()` + `getName()`。
+- 依赖：logback-classic 是 `compileOnly + runtimeOnly`（只有 obs.logging 的转换器需要），业务包只见 slf4j-api。
+- 自检：`gradlew run --args="--demo-log"` 打五种级别 + 一条带堆栈的异常。
+
 ## 代码纪律（来自 HANDOFF §6，换语言也要保留）
 
 - WS 文本帧**不得 JSON 重序列化**（字段顺序与未知字段敏感）；二进制音频帧按 frameOffset 零拷贝透传，`blockId` 是句子序号，错位即全崩。

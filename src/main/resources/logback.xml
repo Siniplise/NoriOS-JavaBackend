@@ -1,9 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 现阶段只求可读；结构化 JSON 日志（requestId / sessionId）等 obs 模块落地后再切。 -->
+<!--
+  日志格式约定（2026-10-30 用户定）：
+
+    10-30 21:05:12.345 INFO  [main] app.NoriBackendApplication:42 - 消息
+    10-30 21:05:12.346 EROR  [main] runtime.SessionLoop:118 - 任务失败
+    java.lang.IllegalStateException: 模拟 TTS 上游 502
+        at net.siniplise.noriosbackend...
+
+  · %lvl4    —— 固定四字符：TRCE / DEBG / INFO / WARN / EROR / CRTL（见 ShortLevelConverter）
+  · %logger4 —— 上一级包 + 类名，省略 net.siniplise.noriosbackend 前缀（见 ShortLoggerConverter）
+  · %line    —— 行号：有了包名+行号才能直接点进 IDE
+  · %ex      —— Exception 全量堆栈，消息行之后另起一段
+  · %thread  —— 虚拟线程名很有信息量（nori-loop-xxx），保留
+
+  想看 DEBG：把下面 root 的 level 改成 DEBUG 即可（Netty 之类第三方库的 DEBUG 会很吵，
+  需要的话再单独给它们压回 INFO）。
+-->
 <configuration>
+
+    <!-- 注意：logback 1.5 起属性名是 class，写 converterClass 会报 deprecation 并刷一屏 status -->
+    <conversionRule conversionWord="lvl4"
+                    class="net.siniplise.noriosbackend.obs.logging.ShortLevelConverter"/>
+    <conversionRule conversionWord="logger4"
+                    class="net.siniplise.noriosbackend.obs.logging.ShortLoggerConverter"/>
+
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{28} - %msg%n</pattern>
+            <pattern>%d{MM-dd HH:mm:ss.SSS} %lvl4 [%thread] %logger4:%line - %msg%n%ex</pattern>
             <charset>UTF-8</charset>
         </encoder>
     </appender>
@@ -11,4 +34,5 @@
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
     </root>
+
 </configuration>

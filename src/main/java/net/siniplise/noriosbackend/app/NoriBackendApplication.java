@@ -3,6 +3,7 @@ package net.siniplise.noriosbackend.app;
 import net.siniplise.noriosbackend.config.ConfigLoader;
 import net.siniplise.noriosbackend.config.NoriConfig;
 import net.siniplise.noriosbackend.contract.NoriPaths;
+import net.siniplise.noriosbackend.obs.logging.LogFormatDemo;
 import net.siniplise.noriosbackend.runtime.SessionLoop;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
@@ -43,6 +44,11 @@ public final class NoriBackendApplication {
 
         if (Arrays.asList(args).contains("--print-config")) {
             System.out.println(loaded.effectiveJson());
+            return;
+        }
+
+        if (Arrays.asList(args).contains("--demo-log")) {
+            LogFormatDemo.run();
             return;
         }
 

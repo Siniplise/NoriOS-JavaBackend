@@ -71,9 +71,12 @@ dependencies {
     implementation(libs.netty.codec.http)
     implementation(libs.netty.handler)
 
-    // 日志：域代码只见 slf4j-api，实现只在运行时
+    // 日志：业务代码只见 slf4j-api；logback 只在 obs.logging 的两个自定义转换器里用到，
+    // 所以用 compileOnly（编译期可见）+ runtimeOnly（运行时实现），不让它会漏进业务包的 import。
     implementation(libs.slf4j.api)
+    compileOnly(libs.logback.classic)
     runtimeOnly(libs.logback.classic)
+    testImplementation(libs.logback.classic)
 
     // 持久化：HANDOFF §7.1 定的是 SQLite(WAL) 起步（记忆/存档/beat 状态落库）
     implementation(libs.sqlite.jdbc)
