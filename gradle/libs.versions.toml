@@ -1,0 +1,35 @@
+# 版本集中管理（对齐 HANDOFF §7.1 选型）
+# 只列“确定要用”的依赖；Spring Boot 的取舍见根 build.gradle.kts 注释。
+
+[versions]
+junit = "5.14.4"
+assertj = "3.27.7"
+slf4j = "2.0.20"
+logback = "1.5.38"
+netty = "4.2.19.Final"
+jackson = "2.22.4"
+sqlite = "3.54.1.0"
+
+[libraries]
+# 测试
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+# 日志（obs 模块统一出入口）
+slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
+logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+
+# HTTP / WS（gateway 的零拷贝转发、tts/persona 的上游客户端）
+netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
+netty-codec-http = { module = "io.netty:netty-codec-http" }
+netty-handler = { module = "io.netty:netty-handler" }
+
+# JSON（注意 §2.3：WS 帧只解析不改写，禁止整帧重序列化）
+jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
+jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
+
+# 持久化：HANDOFF §7.1 建议 SQLite(WAL) 起步。
+# 状态表（script_state / queue / dedupe / session）还没定稿，先不挂到模块上。
+sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }

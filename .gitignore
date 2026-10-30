@@ -1,0 +1,29 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.vscode/
+
+# 本机配置 / 密钥（API KEY 铁律：绝不入库）
+local.properties
+_local_key.txt
+*.env
+
+# 运行期产物
+*.log
+logs/
+/run/
+
+# IDEA 共享运行配置（.run/ 要入库，不忽略）
+!.run/
+
+# OS
+.DS_Store
+Thumbs.db

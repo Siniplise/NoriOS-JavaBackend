@@ -1,0 +1,15 @@
+# 换行统一：仓库内存 LF，检出时按平台
+* text=auto
+
+# 脚本必须保住 LF，否则 bash 跑不起来
+gradlew text eol=lf
+*.sh text eol=lf
+
+# Windows 批处理用 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制
+*.jar binary
+*.zip binary
+*.wav binary
