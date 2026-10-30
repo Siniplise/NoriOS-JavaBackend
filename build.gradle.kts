@@ -1,67 +1,110 @@
-import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 
-// Nori 后端 · 根构建脚本
+// ─────────────────────────────────────────────────────────────────────────────
+// Nori 后端 · 单模块构建
 //
-// 选型说明（与 HANDOFF.md §7.1 的差异，已确认）：
-//   HANDOFF 建议 Java 21 + 虚拟线程；本工程用 Java 25（当前 LTS，虚拟线程早已 GA），
-//   Gradle 9.8.2 原生支持 JDK 25 编译与运行。
-//   HTTP/WS 框架暂不锁定：HANDOFF 给的是 “Netty 原生 或 Spring Boot 3 + WebFlux”，
-//   两者对 Java 25 的支持不同（Boot 3 不支持 class file 69，需 Boot 4）。
-//   所以这一版只搭骨架，不引入任何 Web 框架，等 §8 第 1 步（录制契约）之后再定。
+// 版本与选型：
+//   JDK 25        —— 用户指定（HANDOFF §7.1 原建议 21，虚拟线程 21 已有，25 是当前 LTS）
+//   Gradle 9.8.2  —— wrapper 入库，发行版走腾讯镜像 + sha256 校验
+//   框架未定      —— HANDOFF 给的是「Netty 原生 或 Boot 3 + WebFlux」，
+//                    但 Boot 3 不支持 class file 69（Java 25），要上就得 Boot 4。
+//                    等 §8 第 1 步（录制 golden 契约）之后再定，现在只装依赖不写服务端。
+//
+// 包地图（按功能分包，不按技术分包；新代码先对号入座再动手）：
+//   com.nori.backend
+//   ├── app         启动、配置装配、优雅停机
+//   ├── contract    前端契约：NoriPaths / DTO（前端一行不改，这里就是边界）
+//   ├── gateway     HTTP + WS 入口；WS 双向透传、二进制音频帧按 frameFor 零拷贝
+//   ├── runtime     ★线程模型：SessionLoop（每会话串行）+ Mailbox（子线程通信）
+//   ├── lifecycle   phase / cart / ended、换局软清空、petGate 四类闸门
+//   ├── chat        /v1/* 拦截、固定回应、json_object 一律转发
+//   ├── script      14 beat 表、fact→hook→fire、resetStory、轮换
+//   ├── speech      单队列串行、bubblesFor 分句、9s 兜底、qid/epoch
+//   ├── tts         /tts 与 /tts.stream 客户端、预取；首个 provider 必须对齐 Inworld
+//   ├── touch       摸头回执 + fact 注入（down 期间必须无反应）
+//   ├── content     芯片 / 邮件 / 信号 / 工件闸门
+//   ├── proactive   N3 主动触发 + 节流 + N3_BUSY 互斥
+//   ├── persona     取代 25503：prompt 组装、记忆卡、召回编排、/state /memories /reset
+//   ├── memory      ★三层记忆：card / emotion / personaState / scene + 召回融合 + scene→card 归档
+//   ├── save        ★存档：事件日志 + 快照 + 回放
+//   ├── store       持久化抽象：SQLite(WAL) 起步，pgvector 后续
+//   ├── admin       /api/admin/*：存档 / 记忆 / 人格 / TTS / 端口 管理端点（前端不感知）
+//   └── obs         *stat 指标、结构化日志、/nori-debug
+//
+// 依赖方向铁律：contract ← 所有业务包；runtime 不依赖任何业务包；
+//              业务包之间只允许通过事件（obs/runtime）通信，不允许互相 import 实现类。
+// ─────────────────────────────────────────────────────────────────────────────
 
 plugins {
-    base
+    java
+    application
 }
 
-allprojects {
-    group = "com.nori.backend"
-    version = "0.1.0-SNAPSHOT"
+group = "com.nori.backend"
+version = "0.1.0-SNAPSHOT"
+
+java {
+    toolchain {
+        // 编译与测试都强制 JDK 25，避免落到 PATH 上的其它版本
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    withSourcesJar()
 }
 
-// 版本目录在 subprojects {} 里拿不到 accessor（delegate 换成了子项目），先在这里取出本地引用
-val junitBom = libs.junit.bom
-val junitJupiter = libs.junit.jupiter
-val junitPlatformLauncher = libs.junit.platform.launcher
-val assertjCore = libs.assertj.core
-val slf4jApi = libs.slf4j.api
+application {
+    mainClass = "com.nori.backend.app.NoriBackendApplication"
+    applicationName = "nori-backend"
+    // 本地请求不走系统代理（Clash 会把 127.0.0.1 也绕一圈，HANDOFF §6）
+    applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8", "-Djava.net.useSystemProxies=false")
+}
 
-subprojects {
-    apply(plugin = "java-library")
+dependencies {
+    // JSON（注意 §2.3：WS 帧只解析不改写，禁止整帧重序列化）
+    implementation(platform(libs.jackson.bom))
+    implementation(libs.jackson.databind)
 
-    extensions.configure<JavaPluginExtension> {
-        toolchain {
-            // 编译与测试都强制用 JDK 25，避免落到 PATH 上的其它版本
-            languageVersion = JavaLanguageVersion.of(25)
-        }
-        withSourcesJar()
+    // HTTP / WS：gateway 的入口、tts 与 persona 的上游客户端
+    implementation(platform(libs.netty.bom))
+    implementation(libs.netty.codec.http)
+    implementation(libs.netty.handler)
+
+    // 日志：域代码只见 slf4j-api，实现只在运行时
+    implementation(libs.slf4j.api)
+    runtimeOnly(libs.logback.classic)
+
+    // 持久化：HANDOFF §7.1 定的是 SQLite(WAL) 起步（记忆/存档/beat 状态落库）
+    implementation(libs.sqlite.jdbc)
+
+    // 测试
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.assertj.core)
+    testRuntimeOnly(libs.junit.platform.launcher)
+}
+
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
+    // -Xlint:all 把「可能有问题」的地方提前暴露；-processing 关掉注解处理器告警噪音
+    options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-serial", "-Xlint:-processing"))
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    systemProperty("file.encoding", "UTF-8")
+    testLogging {
+        events("failed", "skipped")
+        exceptionFormat = TestExceptionFormat.FULL
     }
+}
 
-    tasks.withType<JavaCompile>().configureEach {
-        options.encoding = "UTF-8"
-        // -Xlint:all 会把“可能有问题”的地方提前暴露；-processing 关掉注解处理器告警噪音
-        options.compilerArgs.addAll(listOf("-Xlint:all", "-Xlint:-serial", "-Xlint:-processing"))
-    }
-
-    tasks.withType<Test>().configureEach {
-        useJUnitPlatform()
-        systemProperty("file.encoding", "UTF-8")
-        testLogging {
-            events("failed", "skipped")
-            exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
-        }
-    }
-
-    dependencies {
-        // 测试基线：JUnit 5 + AssertJ，BOM 统一版本
-        "testImplementation"(platform(junitBom))
-        "testImplementation"(junitJupiter)
-        "testImplementation"(assertjCore)
-        "testRuntimeOnly"(junitPlatformLauncher)
-
-        // 日志 API 全模块可见（实现由 app 在运行时提供）
-        "implementation"(slf4jApi)
+tasks.jar {
+    manifest {
+        attributes(
+            "Implementation-Title" to "nori-backend",
+            "Implementation-Version" to project.version,
+        )
     }
 }

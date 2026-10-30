@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "ports": {
+    "game": 4183,
+    "admin": 4184
+  },
+  "upstreams": {
+    "gameExe": "http://127.0.0.1:4174",
+    "legacyProxy": "http://127.0.0.1:4173",
+    "tts": "http://127.0.0.1:8880",
+    "persona": "http://127.0.0.1:25503"
+  },
+  "secrets": {
+    "deepseekKeyEnv": "DEEPSEEK_API_KEY",
+    "inworldKeyEnv": "INWORLD_API_KEY"
+  },
+  "llm": {
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "timeoutMs": 60000,
+    "routeEnabled": true
+  },
+  "tts": {
+    "parallel": 3,
+    "gapMs": 300,
+    "prefetch": true,
+    "voice": ""
+  },
+  "script": {
+    "linesFile": "nori_script_lines.json",
+    "stateFile": "nori_script_state.json",
+    "resetOnNewRun": true
+  },
+  "speech": {
+    "fallbackMs": 9000,
+    "dedupeMs": 2500
+  },
+  "touch": {
+    "gateEnabled": true,
+    "requirePatSurface": false
+  },
+  "memory": {
+    "store": "sqlite",
+    "path": "data/nori-memory.db",
+    "recallTopK": 8
+  },
+  "save": {
+    "dir": "data/saves",
+    "autoSave": true,
+    "maxSlots": 20
+  },
+  "obs": {
+    "logDir": "logs",
+    "jsonLogs": true
+  }
+}

@@ -3,7 +3,7 @@
     <option name="ALTERNATIVE_JRE_PATH" value="25" />
     <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
     <option name="MAIN_CLASS_NAME" value="com.nori.backend.app.NoriBackendApplication" />
-    <module name="nori-backend.app" />
+    <module name="nori-backend" />
     <option name="VM_PARAMETERS" value="-Dfile.encoding=UTF-8 -Djava.net.useSystemProxies=false -XX:+ShowCodeDetailsInExceptionMessages" />
     <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
     <method v="2">
