@@ -12,8 +12,8 @@
 
 - Gradle **9.8.2**（wrapper 入库），依赖与发行版**全走腾讯镜像**；`FAIL_ON_PROJECT_REPOS` 锁死仓库来源。
 - JDK **25**（toolchain 写死，`major version 69`）。包根 **`net.siniplise.noriosbackend`**，`group` 同名。
-- **单模块 + 按功能分包**（推翻 13 子项目）。包地图在 `build.gradle.kts` 头注释，别再拆回子项目。
-- **构建交给 IDEA**：不反复跑 Gradle，避免抢 `~/.gradle/caches/journal-1.lock`。
+- **单模块 + 按功能分包**（包地图在 `build.gradle.kts` 头注释）。
+- **构建交给 IDEA**（不抢 `~/.gradle/caches/journal-1.lock`）。
 
 ## 选型
 
@@ -63,6 +63,7 @@
 
 - `/nori-world-gen` 实际是 **GET**（不是 POST）；`/nori-debug` 实际是 **POST**（不是 GET）。
 - `/nori-line` 是客户端 **~706ms 轮询**，不是服务端推送。
+- `/nori-tts` 默认**整段**（流式被用户关：Inworld 流式延迟大）；WS 音频帧由代理自组，流水线见日志。
 
 ## 代码纪律（HANDOFF §6）
 
