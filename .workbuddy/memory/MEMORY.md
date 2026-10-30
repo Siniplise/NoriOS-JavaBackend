@@ -4,13 +4,13 @@
 
 ## 定位与隔离
 
-用 Java 重写 Nori 后端（4173 `nori_proxy.js` + 25503 人格 + 8880 TTS 那一栈）。
+用 Java 重写 Nori 后端（4173 反代 + 25503 人格 + 8880 TTS）。
 **前端一行不改**：MF-Dust 发行包 + 8 个注入脚本是唯一不可变契约。权威需求是 `NoriOSNew/HANDOFF.md`。
-本工程在 `NoriOS-JavaBackend`；**`NoriOSNew` 是主工作区，只读不写**（用户可能正跑任务）。
+**`NoriOSNew` 是主工作区，只读不写**（可能正跑任务）。
 
 ## 构建
 
-- Gradle **9.8.2**（wrapper 入库），发行版与所有依赖**全走腾讯镜像**；`FAIL_ON_PROJECT_REPOS` 禁止子项目自带仓库。
+- Gradle **9.8.2**（wrapper 入库），依赖与发行版**全走腾讯镜像**；`FAIL_ON_PROJECT_REPOS` 锁死仓库来源。
 - JDK **25**（toolchain 写死，`major version 69`）。包根 **`net.siniplise.noriosbackend`**，`group` 同名。
 - **单模块 + 按功能分包**（推翻 13 子项目）。包地图在 `build.gradle.kts` 头注释，别再拆回子项目。
 - **构建交给 IDEA**：不反复跑 Gradle，避免抢 `~/.gradle/caches/journal-1.lock`。
@@ -43,23 +43,26 @@
 
 ## 线程模型
 
-- 每会话一个 `SessionLoop`（虚拟线程 + Mailbox 串行队列），顺序由入队顺序决定，不靠锁 —— 这是「帧序与 blockId 不错位」的唯一保证。
+- 每会话一个 `SessionLoop`（虚拟线程 + Mailbox），顺序由入队顺序决定 —— 「帧序与 blockId 不错位」的唯一保证。
 - loop 之间只用 `Mailbox`；**不要在 loop 内同步等同一个 loop**（自锁）。`offer` 满了返回 false，由调用方显式拒绝。
 
 ## 端口
 
-- 4183 = 反代入口默认（避开旧 Node 4173），4184 = 管理端。
+- 4183 反代入口（避开旧 Node 4173），4184 管理端。
 - 已占：4173 旧反代 / 4174 exe / 4180 冻结探针 / 4199 清档 / 8880 TTS / 25503 人格。
-- 换端口安全（`assets/env-*.js`、`NormalApp-*.js` 优先 `window.location.origin|host`）；
-  唯一真硬编码是 `nori-prompt-inject.js:15` 的 `NORI_LLM_BASE`（改它=动前端）。
+- 换端口安全（`assets/env-*.js` 等优先 `window.location.origin`）；真硬编码只有 `nori-prompt-inject.js:15`。
 
 ## 日志
 
 - `%d{MM-dd HH:mm:ss.SSS} %LVL4 [%thread] %logger{2}:%line - %msg%n%ex`
 - 级别恒四字符 TRCE/DEBG/INFO/WARN/EROR/CRTL（自定义插件）；logger 用内置 `%logger{2}`。
 - **`%lvl4` 不能用**：`%l` 是内置行号别名，会渲染成 `vl4`，键名必须 `%LVL4`。
-- CRTL 两种来源：原生 `log.fatal` 与 `log.error(Critical.CRITICAL, ...)` 的 Marker。
-  **别用 MDC + 包装方法**——多一层栈把 `%line` 指到辅助类，行号就废了。
+- CRTL：原生 `log.fatal` 或 `log.error(Critical.CRITICAL, ...)`；**别用 MDC 包装**，会把 `%line` 指到辅助类。
+
+## 契约实测偏差（以实测为准，别再照抄 HANDOFF 表）
+
+- `/nori-world-gen` 实际是 **GET**（不是 POST）；`/nori-debug` 实际是 **POST**（不是 GET）。
+- `/nori-line` 是客户端 **~706ms 轮询**，不是服务端推送。
 
 ## 代码纪律（HANDOFF §6）
 
