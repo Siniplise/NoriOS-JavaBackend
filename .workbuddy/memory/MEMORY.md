@@ -49,14 +49,13 @@
 ## 端口
 
 - 4183 反代入口（避开旧 Node 4173），4184 管理端。
-- 已占：4173 旧反代 / 4174 exe / 4180 冻结探针 / 4199 清档 / 8880 TTS / 25503 人格。
+- 已占：4173 / 4174 / 4180 / 4199 / 8880 / 25503（旧栈与旁路）。
 - 换端口安全（`assets/env-*.js` 等优先 `window.location.origin`）；真硬编码只有 `nori-prompt-inject.js:15`。
 
 ## 日志
 
 - `%d{MM-dd HH:mm:ss.SSS} %LVL4 [%thread] %logger{2}:%line - %msg%n%ex`
-- 级别恒四字符 TRCE/DEBG/INFO/WARN/EROR/CRTL（自定义插件）；logger 用内置 `%logger{2}`。
-- 键名必须 `%LVL4`：`%lvl4` 会被内置行号别名 `%l` 抢走，渲染成 `vl4`。
+- 级别恒四字符（自定义插件）；logger 用内置 `%logger{2}`。键名必须 `%LVL4`——`%lvl4` 会被 `%l` 抢走。
 - CRTL：原生 `log.fatal` 或 `log.error(Critical.CRITICAL, ...)`；**别用 MDC 包装**，会把 `%line` 指到辅助类。
 
 ## 契约实测偏差（以实测为准，别再照抄 HANDOFF 表）
