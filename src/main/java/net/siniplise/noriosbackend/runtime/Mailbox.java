@@ -1,4 +1,4 @@
-package com.nori.backend.runtime;
+package net.siniplise.noriosbackend.runtime;
 
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;

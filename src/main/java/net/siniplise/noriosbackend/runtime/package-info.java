@@ -8,9 +8,9 @@
  *
  * <h2>三条规则</h2>
  * <ol>
- *   <li><b>一个会话一个 {@link com.nori.backend.runtime.SessionLoop}</b>：会话内的状态变更、
+ *   <li><b>一个会话一个 {@link net.siniplise.noriosbackend.runtime.SessionLoop}</b>：会话内的状态变更、
  *       帧下发、队列推进全部排队执行，顺序由入队顺序唯一决定，不靠锁。</li>
- *   <li><b>loop 之间只通过 {@link com.nori.backend.runtime.Mailbox} 通信</b>：
+ *   <li><b>loop 之间只通过 {@link net.siniplise.noriosbackend.runtime.Mailbox} 通信</b>：
  *       不共享可变对象；跨 loop 需要同步等结果时用 {@code CompletableFuture}，
  *       但绝不在 loop 内部同步等同一个 loop（会自锁）。</li>
  *   <li><b>阻塞式 IO 直接写在虚拟线程里</b>：TTS/LLM/磁盘都是阻塞调用，
@@ -25,4 +25,4 @@
  * 「qid 进程内单调」「9s 兜底」「内容级去重 2.5s」这些行为都依赖「单线程内可见的时序」，
  * 放在 loop 里天然成立；一旦并发就全都要重新论证。
  */
-package com.nori.backend.runtime;
+package net.siniplise.noriosbackend.runtime;

@@ -1,4 +1,4 @@
-package com.nori.backend.contract;
+package net.siniplise.noriosbackend.contract;
 
 import java.util.List;
 

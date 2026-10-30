@@ -14,7 +14,7 @@ import org.gradle.jvm.toolchain.JavaLanguageVersion
 //                    等 §8 第 1 步（录制 golden 契约）之后再定，现在只装依赖不写服务端。
 //
 // 包地图（按功能分包，不按技术分包；新代码先对号入座再动手）：
-//   com.nori.backend
+//   net.siniplise.noriosbackend
 //   ├── app         启动、配置装配、优雅停机
 //   ├── contract    前端契约：NoriPaths / DTO（前端一行不改，这里就是边界）
 //   ├── gateway     HTTP + WS 入口；WS 双向透传、二进制音频帧按 frameFor 零拷贝
@@ -43,7 +43,7 @@ plugins {
     application
 }
 
-group = "com.nori.backend"
+group = "net.siniplise.noriosbackend"
 version = "0.1.0-SNAPSHOT"
 
 java {
@@ -55,7 +55,7 @@ java {
 }
 
 application {
-    mainClass = "com.nori.backend.app.NoriBackendApplication"
+    mainClass = "net.siniplise.noriosbackend.app.NoriBackendApplication"
     applicationName = "nori-backend"
     // 本地请求不走系统代理（Clash 会把 127.0.0.1 也绕一圈，HANDOFF §6）
     applicationDefaultJvmArgs = listOf("-Dfile.encoding=UTF-8", "-Djava.net.useSystemProxies=false")

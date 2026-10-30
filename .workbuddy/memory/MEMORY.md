@@ -20,6 +20,7 @@
 - **所有仓库走腾讯镜像**（用户指定）：`https://mirrors.cloud.tencent.com/nexus/repository/{maven-public,gradle-plugins}/`；
   `repositoriesMode = FAIL_ON_PROJECT_REPOS`，禁止子项目自带 repositories。
 - JDK **25**（toolchain 写死 25，`major version: 69`）。不是 HANDOFF 建议的 21，用户改的。
+- 包根 **`net.siniplise.noriosbackend`**（2026-10-30 用户改，别再回 `com.nori.backend`）；`group` 同名。
 - **单模块 + 按功能分包**（2026-10-30 用户拍板，推翻最初 13 个子项目的做法）。
   包地图在 `build.gradle.kts` 头注释里，新代码先对号入座；**不要再拆回 Gradle 子项目**。
 

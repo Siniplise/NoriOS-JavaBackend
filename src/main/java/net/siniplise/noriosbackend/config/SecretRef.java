@@ -1,4 +1,4 @@
-package com.nori.backend.config;
+package net.siniplise.noriosbackend.config;
 
 import java.util.function.Function;
 

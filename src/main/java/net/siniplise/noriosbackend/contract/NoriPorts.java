@@ -1,4 +1,4 @@
-package com.nori.backend.contract;
+package net.siniplise.noriosbackend.contract;
 
 /**
  * 端口表。
@@ -32,8 +32,8 @@ package com.nori.backend.contract;
  * <h2>配置来源（重要）</h2>
  * 这里只是「出厂默认值 + 已知占用表」，用来给 {@code resources/config/nori-backend.json}
  * 和测试对齐。<b>实际生效的端口不从这里读</b>：唯一事实来源是
- * {@link com.nori.backend.config.NoriConfig#ports()}，由
- * {@link com.nori.backend.config.ConfigLoader} 合并「外部 JSON + 环境变量」后得到。
+ * {@link net.siniplise.noriosbackend.config.NoriConfig#ports()}，由
+ * {@link net.siniplise.noriosbackend.config.ConfigLoader} 合并「外部 JSON + 环境变量」后得到。
  * 两处各自解析会让「改了配置却不生效」，属于必须避免的重复。
  */
 public final class NoriPorts {

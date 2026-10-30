@@ -1,9 +1,9 @@
-package com.nori.backend.app;
+package net.siniplise.noriosbackend.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.nori.backend.contract.NoriPaths;
-import com.nori.backend.contract.NoriPorts;
+import net.siniplise.noriosbackend.contract.NoriPaths;
+import net.siniplise.noriosbackend.contract.NoriPorts;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

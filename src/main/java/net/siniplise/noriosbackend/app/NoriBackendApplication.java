@@ -1,9 +1,9 @@
-package com.nori.backend.app;
+package net.siniplise.noriosbackend.app;
 
-import com.nori.backend.config.ConfigLoader;
-import com.nori.backend.config.NoriConfig;
-import com.nori.backend.contract.NoriPaths;
-import com.nori.backend.runtime.SessionLoop;
+import net.siniplise.noriosbackend.config.ConfigLoader;
+import net.siniplise.noriosbackend.config.NoriConfig;
+import net.siniplise.noriosbackend.contract.NoriPaths;
+import net.siniplise.noriosbackend.runtime.SessionLoop;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;

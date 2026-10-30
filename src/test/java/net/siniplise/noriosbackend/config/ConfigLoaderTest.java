@@ -1,9 +1,9 @@
-package com.nori.backend.config;
+package net.siniplise.noriosbackend.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.nori.backend.contract.NoriPorts;
+import net.siniplise.noriosbackend.contract.NoriPorts;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

@@ -1,4 +1,4 @@
-package com.nori.backend.runtime;
+package net.siniplise.noriosbackend.runtime;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;

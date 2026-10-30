@@ -1,4 +1,4 @@
-package com.nori.backend.config;
+package net.siniplise.noriosbackend.config;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
