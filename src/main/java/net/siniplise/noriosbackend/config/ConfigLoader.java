@@ -90,6 +90,16 @@ public final class ConfigLoader {
         public boolean hasUnknownKeys() {
             return !unknownKeys.isEmpty();
         }
+
+        /** 换一个游戏上游（不动配置文件）。影子对比与网关测试都靠它换个目标。 */
+        public Loaded withGameExe(String gameExe) {
+            var u = config.upstreams();
+            var next = new NoriConfig(config.ports(),
+                    new NoriConfig.Upstreams(gameExe, u.legacyProxy(), u.tts(), u.persona()),
+                    config.secrets(), config.llm(), config.tts(), config.script(),
+                    config.speech(), config.touch(), config.memory(), config.save(), config.obs());
+            return new Loaded(next, effectiveJson, effectiveTree, unknownKeys, source);
+        }
     }
 
     private record Binding(String env, String path) {

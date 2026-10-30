@@ -77,7 +77,7 @@ public class NoriBackendApplication {
      * 装配容器：端口与配置注入都在这里。
      * 抽成方法是为了让测试能复用同一套装配逻辑——测试里另写一遍就会和 main 漂移。
      */
-    static SpringApplication newApplication(ConfigLoader.Loaded loaded) {
+    public static SpringApplication newApplication(ConfigLoader.Loaded loaded) {
         SpringApplication app = new SpringApplication(NoriBackendApplication.class);
         app.setDefaultProperties(Map.of(
                 // 端口来自配置文件（默认 4183，避开还在跑的旧 Node 4173），不写死在这里
