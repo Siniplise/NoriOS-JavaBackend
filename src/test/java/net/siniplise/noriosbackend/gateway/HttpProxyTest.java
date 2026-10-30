@@ -44,6 +44,15 @@ class HttpProxyTest {
                     + " body=" + body;
             lastRequest.set(seen);
 
+            // 如果我们的 /nori-* 被误转发到上游，这里会返回 500，测试立刻暴露
+            if (exchange.getRequestURI().getRawPath().startsWith("/nori-")) {
+                byte[] leaked = "leaked-to-upstream".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(500, leaked.length);
+                try (OutputStream out = exchange.getResponseBody()) {
+                    out.write(leaked);
+                }
+                return;
+            }
             byte[] payload = ("echo:" + exchange.getRequestURI().getRawPath()).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("x-upstream", "yes");
             exchange.getResponseHeaders().add("Connection", "keep-alive"); // 逐跳头，必须被过滤掉
@@ -124,18 +133,20 @@ class HttpProxyTest {
     }
 
     @Test
-    @DisplayName("/nori-* 不转发上游，直接 501（未实现的显式信号）")
+    @DisplayName("/nori-* 由控制器处理，不会被转发到上游")
     void ownEndpointsAreNotForwarded() {
         String proxy = startAppAndProxy(upstreamBase);
 
-        var status = WebClient.create(proxy)
+        var result = WebClient.create(proxy)
                 .get()
                 .uri("/nori-lifestat")
                 .exchangeToMono(resp -> resp.bodyToMono(String.class)
-                        .map(body -> resp.statusCode().value()))
+                        .map(body -> new Object[] {resp.statusCode().value(), body}))
                 .block(Duration.ofSeconds(15));
 
-        assertThat(status).isEqualTo(501);
+        assertThat(result).isNotNull();
+        assertThat(result[0]).as("上游对 /nori-* 会回 500，能返回 200 说明没被转发").isEqualTo(200);
+        assertThat((String) result[1]).contains("phase");
     }
 
     @Test

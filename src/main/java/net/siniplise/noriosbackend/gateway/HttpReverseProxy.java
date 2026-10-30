@@ -76,9 +76,9 @@ public class HttpReverseProxy implements WebFilter, Ordered {
         if (path.startsWith("/api/admin") || path.equals("/error")) {
             return chain.filter(exchange);
         }
+        // 自有端点交给注解控制器；没实现的会自然 404（比 501 更贴近"路径不存在"的真相）
         if (isOwnEndpoint(path)) {
-            return fail(exchange, HttpStatus.NOT_IMPLEMENTED,
-                    "{\"error\":\"not implemented yet\",\"path\":\"" + path + "\"}");
+            return chain.filter(exchange);
         }
         return forward(exchange);
     }

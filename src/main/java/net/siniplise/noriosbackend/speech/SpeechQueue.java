@@ -80,6 +80,11 @@ public final class SpeechQueue {
         this.clockMs = clockMs;
     }
 
+    /** 把所有权交给当前线程（通常是 SessionLoop 线程）。 */
+    public void ownedByCurrentThread() {
+        guard.claim();
+    }
+
     /** 入队一句（重复 qid 允许：同一句被重新触发是真实场景）。 */
     public void enqueue(Line line) {
         guard.assertOwner();
