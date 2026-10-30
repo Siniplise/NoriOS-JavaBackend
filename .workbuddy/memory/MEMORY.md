@@ -18,6 +18,7 @@
 ## 选型
 
 - **Spring Boot 4.1.2 + WebFlux**。Boot 3 不支持 Java 25（class file 69），要用 Boot 只能 4。
+  **已在 IDEA 里 build 通过**（2026-10-30 23:44），装配成立，不用再怀疑这套组合。
 - **Jackson 3**（`tools.jackson.*`，Boot 4 默认；注解仍在 `com.fasterxml.jackson.annotation`）。
 - **Log4j2** 由 `spring-boot-starter-log4j2` 提供，版本归 Boot BOM；
   必须**全局** exclude `spring-boot-starter-logging`（Boot 4 把它挂在 `spring-boot-starter` 下，只排 webflux 那条边无效）。
