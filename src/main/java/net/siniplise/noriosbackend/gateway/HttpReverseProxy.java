@@ -67,6 +67,11 @@ public class HttpReverseProxy implements WebFilter, Ordered {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getURI().getRawPath();
 
+        // WS 升级必须放行给 WebSocketHandlerAdapter：当成普通 GET 转给上游的话，
+        // 浏览器只会看到 "Unexpected response code: 200"，通道永远建不起来。
+        if (isWebSocketUpgrade(exchange.getRequest())) {
+            return chain.filter(exchange);
+        }
         // 管理端与 Boot 错误页放行给下游 handler
         if (path.startsWith("/api/admin") || path.equals("/error")) {
             return chain.filter(exchange);
@@ -118,6 +123,12 @@ public class HttpReverseProxy implements WebFilter, Ordered {
         out.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         DataBuffer buffer = out.bufferFactory().wrap(json.getBytes(StandardCharsets.UTF_8));
         return out.writeWith(Flux.just(buffer));
+    }
+
+    /** `Upgrade: websocket`（大小写不敏感）。 */
+    static boolean isWebSocketUpgrade(ServerHttpRequest request) {
+        String upgrade = request.getHeaders().getFirst("Upgrade");
+        return upgrade != null && "websocket".equalsIgnoreCase(upgrade.trim());
     }
 
     private static boolean hasBody(HttpMethod method) {
