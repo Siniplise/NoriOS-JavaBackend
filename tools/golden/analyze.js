@@ -80,7 +80,9 @@ function pickDir() {
   const base = path.resolve(__dirname, '..', '..', 'golden');
   const dirs = fs
     .readdirSync(base, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && !d.name.startsWith('_'))
+    // 只认「正常收尾」的目录：被取消的录制没有 manifest.json，分析它只会崩
+    .filter((d) => d.isDirectory() && !d.name.startsWith('_')
+      && fs.existsSync(path.join(base, d.name, 'manifest.json')))
     .map((d) => ({ name: d.name, mtime: fs.statSync(path.join(base, d.name)).mtimeMs }))
     .sort((a, b) => b.mtime - a.mtime);
   if (!dirs.length) throw new Error('golden/ 下没有轨迹目录');
@@ -177,10 +179,12 @@ if (!binaries.length) {
     if (!file || !fs.existsSync(file)) continue;
     frames.push({ ts: b.ts, dir: b.dir, conn: b.conn, ...parseFrame(fs.readFileSync(file)) });
   }
-  // blockId 是「每个连接内」的句子序号，两个通道各自从 0 开始，必须带上 conn 才能判连续性
+  // ★ 关键：blockId 是「一次回复内的句子序号」，每次回复都从 0 开始；
+  //   所以唯一键必须是 (msgUuid, blockId)，只按 blockId 分组会把不同回复的同一句混成一堆，
+  //   表现成「chunkId 重复 / 不连续」——这正是我们一开始的误判。
   const blocks = new Map();
   for (const f of frames) {
-    const key = `${f.conn}/${f.blockId}`;
+    const key = `${(f.msg || '').slice(0, 8)}/${f.blockId}`;
     if (!blocks.has(key)) blocks.set(key, []);
     blocks.get(key).push(f);
   }
@@ -189,9 +193,11 @@ if (!binaries.length) {
     const chunkIds = fs2.map((f) => f.chunkId);
     const contiguous = chunkIds.every((c, i) => i === 0 || c === chunkIds[i - 1] + 1);
     const complete = fs2.some((f) => f.isComplete);
-    console.log(`    block ${String(blockId).padStart(3)}: ${fs2.length} 块, chunk ${chunkIds[0]}..${chunkIds[chunkIds.length - 1]}` +
-      `${contiguous ? ' 连续' : ' ⚠ 不连续'}, ${complete ? '有 complete 标记' : '⚠ 无 complete'}, ` +
-      `${(fs2.reduce((a, f) => a + f.pcmBytes, 0) / 1024).toFixed(0)} KB`);
+    const durSec = (fs2.reduce((a, f) => a + f.pcmBytes, 0) / 2 / 32000).toFixed(1);
+    const completeCount = fs2.filter((f) => f.isComplete).length;
+    console.log(`    msg=${blockId.split('/')[0]} block=${blockId.split('/')[1]}: ${fs2.length} 块, ` +
+      `chunk ${chunkIds[0]}..${chunkIds[chunkIds.length - 1]}${contiguous ? ' 连续' : ' ⚠ 不连续'}, ` +
+      `complete×${completeCount}${completeCount === 1 ? '' : ' ⚠ 应为 1'}, ${durSec}s`);
   }
   console.log('');
 }

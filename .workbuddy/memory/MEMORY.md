@@ -6,7 +6,7 @@
 
 用 Java 重写 Nori 后端（4173 反代 + 25503 人格 + 8880 TTS）。
 **前端一行不改**：MF-Dust 发行包 + 8 个注入脚本是唯一不可变契约。权威需求是 `NoriOSNew/HANDOFF.md`。
-**`NoriOSNew` 是主工作区：只读不写，`*.bat` 脚本也不碰**（另一个 session 在用）。
+**`NoriOSNew` 只读**（代码/文档可读，不写、不动 git）——另一个 session 在用。
 
 ## 构建
 
@@ -56,14 +56,15 @@
 
 - `%d{MM-dd HH:mm:ss.SSS} %LVL4 [%thread] %logger{2}:%line - %msg%n%ex`
 - 级别恒四字符 TRCE/DEBG/INFO/WARN/EROR/CRTL（自定义插件）；logger 用内置 `%logger{2}`。
-- **`%lvl4` 不能用**：`%l` 是内置行号别名，会渲染成 `vl4`，键名必须 `%LVL4`。
+- 键名必须 `%LVL4`：`%lvl4` 会被内置行号别名 `%l` 抢走，渲染成 `vl4`。
 - CRTL：原生 `log.fatal` 或 `log.error(Critical.CRITICAL, ...)`；**别用 MDC 包装**，会把 `%line` 指到辅助类。
 
 ## 契约实测偏差（以实测为准，别再照抄 HANDOFF 表）
 
 - `/nori-world-gen` 实际是 **GET**（不是 POST）；`/nori-debug` 实际是 **POST**（不是 GET）。
 - `/nori-line` 是客户端 **~706ms 轮询**，不是服务端推送。
-- `/nori-tts` 默认**整段**（流式被用户关：Inworld 流式延迟大）；WS 音频帧由代理自组，流水线见日志。
+- `/nori-tts` 默认**整段**（流式被用户关）；WS 音频帧由代理自组（180ms/块）。
+- **blockId = 回复内句子序号**（每次回复重置）；唯一键要 (msgUuid, blockId)。
 
 ## 代码纪律（HANDOFF §6）
 
