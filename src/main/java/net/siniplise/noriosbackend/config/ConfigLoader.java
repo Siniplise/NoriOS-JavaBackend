@@ -1,12 +1,5 @@
 package net.siniplise.noriosbackend.config;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.node.BooleanNode;
-import com.fasterxml.jackson.databind.node.IntNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.TextNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -18,6 +11,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.BooleanNode;
+import tools.jackson.databind.node.IntNode;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.StringNode;
 
 /**
  * 配置加载：默认值（classpath） → 外部 JSON 覆盖 → 环境变量覆盖 → 校验。
@@ -47,7 +49,11 @@ public final class ConfigLoader {
     /** 出厂默认值（classpath）。 */
     public static final String CLASSPATH_DEFAULT = "/config/nori-backend.json";
 
-    private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+    private static final ObjectMapper MAPPER = JsonMapper.builder()
+            // 容忍未知字段：管理器或新版本可能写进我们还不认识的键。这些键由 merge() 保留，
+            // 并在 unknownKeys 里被点名——用「报告」而不是「启动即失败」来处理，比直接炸更可控。
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .build();
 
     /** 环境变量 → JSON 路径。布尔项接受 on/off/true/false/1/0（HANDOFF 的写法是 on/off）。 */
     private static final List<Binding> BINDINGS = List.of(
@@ -67,8 +73,19 @@ public final class ConfigLoader {
             new Binding("NORI_RUN_RESET", "script.resetOnNewRun"),
             new Binding("NORI_MEMORY_STORE", "memory.store"));
 
-    /** 加载结果：类型化视图 + 生效中的 JSON 快照 + 拼错的键 + 来源。 */
-    public record Loaded(NoriConfig config, String effectiveJson, List<String> unknownKeys, String source) {
+    /**
+     * 加载结果：类型化视图 + 生效中的 JSON 快照（文本与树两份）+ 拼错的键 + 来源。
+     *
+     * <p>为什么同时给文本和树：文本给日志/CLI 打印，树给管理端点直接返回——
+     * WebFlux 里返回字符串再标 {@code application/json} 很可能被当成「字符串」序列化，
+     * 出去是一坨带转义引号的内容，管理器根本没法当对象解析。
+     */
+    public record Loaded(
+            NoriConfig config,
+            String effectiveJson,
+            JsonNode effectiveTree,
+            List<String> unknownKeys,
+            String source) {
 
         public boolean hasUnknownKeys() {
             return !unknownKeys.isEmpty();
@@ -95,16 +112,23 @@ public final class ConfigLoader {
         String source = "classpath:" + CLASSPATH_DEFAULT;
 
         if (external != null && Files.isRegularFile(external)) {
+            String text;
             try {
-                JsonNode node = MAPPER.readTree(Files.readString(external, StandardCharsets.UTF_8));
-                if (!node.isObject()) {
-                    throw new IllegalStateException(external + " 的根节点必须是 JSON 对象");
-                }
-                merge(effective, (ObjectNode) node, "", unknownKeys);
-                source = external.toAbsolutePath().toString();
+                text = Files.readString(external, StandardCharsets.UTF_8);
             } catch (IOException e) {
                 throw new UncheckedIOException("读不出配置文件: " + external, e);
             }
+            JsonNode node;
+            try {
+                node = MAPPER.readTree(text);
+            } catch (JacksonException e) {
+                throw new IllegalStateException("配置文件不是合法 JSON: " + external, e);
+            }
+            if (!node.isObject()) {
+                throw new IllegalStateException(external + " 的根节点必须是 JSON 对象");
+            }
+            merge(effective, (ObjectNode) node, "", unknownKeys);
+            source = external.toAbsolutePath().toString();
         }
 
         applyEnv(effective, env);
@@ -113,27 +137,29 @@ public final class ConfigLoader {
         NoriConfig config;
         try {
             config = MAPPER.treeToValue(effective, NoriConfig.class);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("配置绑定失败（字段类型不匹配？）", e);
         }
 
-        return new Loaded(config, pretty(effective), List.copyOf(unknownKeys), source);
+        return new Loaded(config, pretty(effective), effective, List.copyOf(unknownKeys), source);
     }
 
     /** 出厂默认值的可变副本。 */
     public static ObjectNode defaults() {
+        byte[] bytes;
         try (InputStream in = ConfigLoader.class.getResourceAsStream(CLASSPATH_DEFAULT)) {
             if (in == null) {
                 throw new IllegalStateException("classpath 缺少默认配置: " + CLASSPATH_DEFAULT);
             }
-            JsonNode node = MAPPER.readTree(in);
-            if (!node.isObject()) {
-                throw new IllegalStateException("默认配置根节点必须是 JSON 对象");
-            }
-            return (ObjectNode) node;
+            bytes = in.readAllBytes();
         } catch (IOException e) {
             throw new UncheckedIOException("读不出默认配置", e);
         }
+        JsonNode node = MAPPER.readTree(bytes);
+        if (!node.isObject()) {
+            throw new IllegalStateException("默认配置根节点必须是 JSON 对象");
+        }
+        return (ObjectNode) node;
     }
 
     // ── 合并 ────────────────────────────────────────────────────────────────
@@ -199,7 +225,7 @@ public final class ConfigLoader {
             }
         } else if (current instanceof BooleanNode) {
             parent.put(leaf, parseBoolean(binding.env(), raw));
-        } else if (current instanceof TextNode) {
+        } else if (current instanceof StringNode) {
             parent.put(leaf, normalizeUrl(binding.path(), raw));
         } else {
             throw new IllegalStateException("不支持的配置类型: " + binding.path());
@@ -243,14 +269,14 @@ public final class ConfigLoader {
         checkMin(root, "save.maxSlots", 1);
         checkMin(root, "llm.timeoutMs", 1_000);
 
-        String store = root.at("/memory/store").asText();
+        String store = root.at("/memory/store").asString();
         if (!List.of("sqlite", "postgres").contains(store)) {
             throw new IllegalStateException("memory.store 只能是 sqlite 或 postgres，实际是: " + store);
         }
 
         // 密钥铁律的最后一道闸：JSON 里只允许出现环境变量名，出现疑似真 key 立刻拒绝启动
         for (String field : List.of("/secrets/deepseekKeyEnv", "/secrets/inworldKeyEnv")) {
-            String value = root.at(field).asText("");
+            String value = root.at(field).asString("");
             if (value.startsWith("sk-") || value.length() > 60) {
                 throw new IllegalStateException(
                         field + " 里存的是密钥值，不是环境变量名——立刻停手，把 key 移回环境变量");
@@ -282,11 +308,7 @@ public final class ConfigLoader {
     }
 
     private static String pretty(JsonNode node) {
-        try {
-            return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
-        } catch (IOException e) {
-            throw new UncheckedIOException("序列化配置失败", e);
-        }
+        return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(node);
     }
 
     /** 只读视图：给管理器表格/日志用，避免外部直接改内部树。 */

@@ -5,10 +5,8 @@
 junit = "5.14.4"
 assertj = "3.27.7"
 slf4j = "2.0.20"
-log4j = "2.26.1"
-netty = "4.2.19.Final"
-jackson = "2.22.4"
 sqlite = "3.54.1.0"
+springBoot = "4.1.2"
 
 [libraries]
 # 测试
@@ -18,22 +16,19 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
 # 日志（obs 模块统一出入口）
-# 2026-10-30 从 logback 换成 Log4j2：原生 FATAL 级别 + 可插拔 AsyncLogger（Disruptor）
+# Log4j2 的实现（api / core / slf4j binding）全部由 Boot 的 log4j2 starter 带进来，版本归 Boot BOM 管；
+# 这里只留 log4j-core 给注解处理器用（它不在 starter 的注解处理器路径上，必须单独声明）。
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
-log4j-bom = { module = "org.apache.logging.log4j:log4j-bom", version.ref = "log4j" }
-log4j-api = { module = "org.apache.logging.log4j:log4j-api" }
 log4j-core = { module = "org.apache.logging.log4j:log4j-core" }
-log4j-slf4j2-impl = { module = "org.apache.logging.log4j:log4j-slf4j2-impl" }
 
-# HTTP / WS（gateway 的零拷贝转发、tts/persona 的上游客户端）
-netty-bom = { module = "io.netty:netty-bom", version.ref = "netty" }
-netty-codec-http = { module = "io.netty:netty-codec-http" }
-netty-handler = { module = "io.netty:netty-handler" }
-
-# JSON（注意 §2.3：WS 帧只解析不改写，禁止整帧重序列化）
-jackson-bom = { module = "com.fasterxml.jackson:jackson-bom", version.ref = "jackson" }
-jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind" }
+# Spring Boot 4（版本一律交给 BOM，避免和 starter 各自写版本）
+spring-boot-bom = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot" }
+spring-boot-starter-webflux = { module = "org.springframework.boot:spring-boot-starter-webflux" }
+spring-boot-starter-log4j2 = { module = "org.springframework.boot:spring-boot-starter-log4j2" }
 
 # 持久化：HANDOFF §7.1 建议 SQLite(WAL) 起步。
 # 状态表（script_state / queue / dedupe / session）还没定稿，先不挂到模块上。
 sqlite-jdbc = { module = "org.xerial:sqlite-jdbc", version.ref = "sqlite" }
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
