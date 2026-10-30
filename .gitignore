@@ -28,6 +28,7 @@ logs/
 .DS_Store
 Thumbs.db
 
-# golden 录制产物：含真实对话、记忆、音频，绝不入库
-golden/
+# golden 录制产物：含真实对话、记忆、音频，绝不入库。
+# 注意要写成 /golden/（只匹配仓库根）——写 golden/ 会连 tools/golden/ 的源码一起忽略
+/golden/
 tools/golden/node_modules/
