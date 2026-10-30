@@ -14,11 +14,12 @@
 - JDK **25**（toolchain 写死，`major version 69`）。包根 **`net.siniplise.noriosbackend`**，`group` 同名。
 - **单模块 + 按功能分包**（推翻 13 子项目）。包地图在 `build.gradle.kts` 头注释，别再拆回子项目。
 - **构建交给 IDEA**：不反复跑 Gradle，避免抢 `~/.gradle/caches/journal-1.lock`。
+  撞锁时直接按 PID 终止 cmdline 含 `GradleDaemon` 的 java 进程（`gradlew --stop` 也会被同一把锁挡住）。
 
 ## 选型
 
 - **Spring Boot 4.1.2 + WebFlux**。Boot 3 不支持 Java 25（class file 69），要用 Boot 只能 4。
-  **已在 IDEA 里 build 通过**（2026-10-30 23:44），装配成立，不用再怀疑这套组合。
+  **IDEA build 已通过**（10-30 23:44）。
 - **Jackson 3**（`tools.jackson.*`，Boot 4 默认；注解仍在 `com.fasterxml.jackson.annotation`）。
 - **Log4j2** 由 `spring-boot-starter-log4j2` 提供，版本归 Boot BOM；
   必须**全局** exclude `spring-boot-starter-logging`（Boot 4 把它挂在 `spring-boot-starter` 下，只排 webflux 那条边无效）。
