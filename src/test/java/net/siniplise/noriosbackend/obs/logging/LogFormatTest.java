@@ -58,9 +58,10 @@ class LogFormatTest {
 
     @Test
     @DisplayName("插件渲染进 pattern：%LVL4 输出四字符，%logger{2} 只留上一级包")
+    @SuppressWarnings("deprecation") // withPattern 已弃用，但 Boot 4 管的 log4j 2.25.5 没有替代品
     void patternRendersAsConfigured() {
         PatternLayout layout = PatternLayout.newBuilder()
-                .setPattern("%LVL4|%logger{2}|%msg")
+                .withPattern("%LVL4|%logger{2}|%msg")
                 .build();
 
         LogEvent event = Log4jLogEvent.newBuilder()
