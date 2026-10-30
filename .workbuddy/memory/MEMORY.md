@@ -14,7 +14,6 @@
 - JDK **25**（toolchain 写死，`major version 69`）。包根 **`net.siniplise.noriosbackend`**，`group` 同名。
 - **单模块 + 按功能分包**（推翻 13 子项目）。包地图在 `build.gradle.kts` 头注释，别再拆回子项目。
 - **构建交给 IDEA**：不反复跑 Gradle，避免抢 `~/.gradle/caches/journal-1.lock`。
-  撞锁时直接按 PID 终止 cmdline 含 `GradleDaemon` 的 java 进程（`gradlew --stop` 也会被同一把锁挡住）。
 
 ## 选型
 
@@ -51,8 +50,8 @@
 
 - 4183 = 反代入口默认（避开旧 Node 4173），4184 = 管理端。
 - 已占：4173 旧反代 / 4174 exe / 4180 冻结探针 / 4199 清档 / 8880 TTS / 25503 人格。
-- 前端换端口安全：`assets/env-*.js`、`NormalApp-*.js` 优先 `window.location.origin|host`。
-  **唯一真硬编码**：`nori-prompt-inject.js:15` 的 `NORI_LLM_BASE`（改它=动前端）。
+- 换端口安全（`assets/env-*.js`、`NormalApp-*.js` 优先 `window.location.origin|host`）；
+  唯一真硬编码是 `nori-prompt-inject.js:15` 的 `NORI_LLM_BASE`（改它=动前端）。
 
 ## 日志
 
