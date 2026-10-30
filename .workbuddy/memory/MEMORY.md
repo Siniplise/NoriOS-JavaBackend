@@ -6,7 +6,7 @@
 
 用 Java 重写 Nori 后端（4173 反代 + 25503 人格 + 8880 TTS）。
 **前端一行不改**：MF-Dust 发行包 + 8 个注入脚本是唯一不可变契约。权威需求是 `NoriOSNew/HANDOFF.md`。
-**`NoriOSNew` 是主工作区，只读不写**（可能正跑任务）。
+**`NoriOSNew` 是主工作区：只读不写，`*.bat` 脚本也不碰**（另一个 session 在用）。
 
 ## 构建
 
@@ -37,7 +37,7 @@
 
 - 唯一事实来源 JSON，三层：出厂默认（`resources/config/nori-backend.json`）→ 本机覆盖（`./config/nori-backend.json`，深合并）
   → 环境变量（`NORI_*`）。`Loaded` 同时给 `effectiveJson()`（文本）与 `effectiveTree()`（树）。
-- 加字段四步：JSON 默认值 → `NoriConfig` record → `ConfigLoader.BINDINGS` → `validate`。
+- 加字段四步：JSON 默认值 → record → `BINDINGS` → `validate`。
 - 端口只从 `NoriConfig.ports()` 读；`NoriPorts` 仅默认值与占用表（避免两处各解析）。
 - 密钥只有 `secrets.*KeyEnv` 变量名，值走 `SecretRef`（env，缺失即抛）；JSON 里疑似真 key 直接拒绝启动。
 
