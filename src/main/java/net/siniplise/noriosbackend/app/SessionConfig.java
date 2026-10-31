@@ -1,5 +1,7 @@
 package net.siniplise.noriosbackend.app;
 
+import net.siniplise.noriosbackend.gateway.MediaHub;
+import net.siniplise.noriosbackend.tts.TtsClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -14,7 +16,7 @@ import org.springframework.context.annotation.Configuration;
 public class SessionConfig {
 
     @Bean
-    public SessionRuntime sessionRuntime() {
-        return new SessionRuntime("main");
+    public SessionRuntime sessionRuntime(TtsClient tts, MediaHub media) {
+        return new SessionRuntime("main", tts, media);
     }
 }

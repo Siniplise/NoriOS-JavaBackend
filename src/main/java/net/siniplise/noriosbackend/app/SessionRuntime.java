@@ -2,9 +2,17 @@ package net.siniplise.noriosbackend.app;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.List;
+import java.util.UUID;
+import net.siniplise.noriosbackend.contract.ArcadeFrame;
 import net.siniplise.noriosbackend.lifecycle.LifecycleMachine;
 import net.siniplise.noriosbackend.runtime.SessionLoop;
+import net.siniplise.noriosbackend.speech.MediaSink;
+import net.siniplise.noriosbackend.speech.MediaSinkProvider;
 import net.siniplise.noriosbackend.speech.SpeechQueue;
+import net.siniplise.noriosbackend.tts.SpeechFramer;
+import net.siniplise.noriosbackend.tts.TtsClient;
+import reactor.core.publisher.Mono;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,8 +34,19 @@ public final class SessionRuntime implements AutoCloseable {
     private final SessionLoop loop;
     private final LifecycleMachine lifecycle;
     private final SpeechQueue speech;
+    private final TtsClient tts;
+    private final MediaSinkProvider media;
+
+    /** 一次回复内的帧序号发生器；换回复就换一个（chunkId 归零）。 */
+    private SpeechFramer framer = new SpeechFramer(UUID.randomUUID(), UUID.randomUUID());
 
     public SessionRuntime(String name) {
+        this(name, null, null);
+    }
+
+    public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media) {
+        this.tts = tts;
+        this.media = media;
         this.loop = new SessionLoop(name);
         this.lifecycle = new LifecycleMachine();
         this.speech = new SpeechQueue();
@@ -43,6 +62,50 @@ public final class SessionRuntime implements AutoCloseable {
             throw new IllegalStateException("会话初始化失败", e);
         }
         log.debug("session {} 已就绪", name);
+    }
+
+    /**
+     * 播一句：合成（可并发）→ 组帧（会话线程）→ 推给媒体通道。
+     *
+     * <p>为什么组帧必须回到会话线程：`seq/chunkId` 的唯一性与发送顺序必须同源（Q5）。
+     * 合成放在外面，是为了让多句合成能并行，而帧号与写出保持串行。
+     *
+     * @return 实际发出去的帧数（没有媒体连接时为 0）
+     */
+    public CompletableFuture<Integer> speak(String text, String voice, int blockId, int gapMs) {
+        if (tts == null) {
+            return CompletableFuture.failedFuture(new IllegalStateException("未配置 TtsClient"));
+        }
+        return tts.synthesize32k(text, voice)
+                .flatMap(pcm -> Mono.fromFuture(onLoop(() -> {
+                    SpeechFramer current = framer;
+                    List<ArcadeFrame> frames = current.sentence(pcm, blockId, gapMs);
+                    MediaSink sink = media == null ? null : media.current();
+                    if (sink == null) {
+                        log.debug("speak: 没有媒体连接，丢弃 {} 帧（block={}）", frames.size(), blockId);
+                        return 0;
+                    }
+                    int sent = 0;
+                    for (ArcadeFrame frame : frames) {
+                        sink.send(frame);
+                        sent++;
+                    }
+                    return sent;
+                })))
+                .toFuture();
+    }
+
+    /** 新一次回复：chunkId/seq 归零（blockId 从 0 重新数）。 */
+    public CompletableFuture<Void> beginReply() {
+        return onLoop(() -> {
+            framer = new SpeechFramer(UUID.randomUUID(), UUID.randomUUID());
+            return null;
+        });
+    }
+
+    /** 媒体通道是否在线。 */
+    public boolean hasMedia() {
+        return media != null && media.current() != null;
     }
 
     /** 只读投递：给调用方一个不阻塞的入口。 */

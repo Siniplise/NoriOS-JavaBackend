@@ -7,6 +7,8 @@ import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import java.net.URI;
 import java.util.List;
 import net.siniplise.noriosbackend.config.ConfigLoader;
+import net.siniplise.noriosbackend.contract.NoriPaths;
+import net.siniplise.noriosbackend.speech.MediaSink;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -56,11 +58,13 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
 
     private final URI upstream;
     private final HttpClient httpClient;
+    private final MediaHub mediaHub;
 
-    public ArcadeWebSocketProxy(ObjectProvider<ConfigLoader.Loaded> configProvider) {
+    public ArcadeWebSocketProxy(ObjectProvider<ConfigLoader.Loaded> configProvider, MediaHub mediaHub) {
         ConfigLoader.Loaded loaded = configProvider.getIfAvailable(ConfigLoader::load);
         this.upstream = URI.create(loaded.config().upstreams().gameExe());
         this.httpClient = HttpClient.create();
+        this.mediaHub = mediaHub;
         log.info("gateway: WS 反代目标 {}", upstream);
     }
 
@@ -76,6 +80,11 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
             // 注意：reactor-netty 这个 API 收的是**逗号分隔的单个字符串**，不是 varargs
             spec.protocols(String.join(",", protocols));
         }
+
+        // 媒体通道额外登记为"音频出口"：台词合成后由会话线程直接推帧给这个连接。
+        // 上游仍然照常转发（上游若也发媒体帧，两边内容不会冲突——实测上游一个都不发）。
+        final MediaSink registered = path.startsWith(NoriPaths.WS_MEDIA)
+                ? mediaHub.register(browser) : null;
 
         String upstreamUrl = "ws://" + upstream.getAuthority() + path;
         log.debug("ws: 升级 {} -> {} protocols={}", path, upstreamUrl, protocols);
@@ -112,6 +121,11 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
                                     })).then();
                     // 任一方向结束就收整条连接：半开的 WS 会让对端以为还活着
                     return Mono.when(down, up).doFinally(signal -> conn.dispose());
+                })
+                .doFinally(signal -> {
+                    if (registered != null) {
+                        mediaHub.close(registered);
+                    }
                 })
                 .onErrorResume(error -> {
                     log.error("ws: 连上游失败 {}: {}", upstreamUrl, error.toString());

@@ -20,6 +20,8 @@
 | Q11 | contract | `/nori-world-gen` 实测 GET，文档写 POST | 低 |
 | Q12 | gateway | `nori.ai.config` 是我们自研消息，不在上游协议里 | 中 |
 | Q13 | app/config | 环境变量 `SERVER_*` 会污染 Boot 属性 | 中 |
+| Q14 | gateway/media | 新连接顶掉旧音频出口，多开窗口会互相踢 | 中 |
+| Q15 | gateway/tts | 若上游也发媒体帧，会与我们生成的 seq 冲突 | 中 |
 
 ---
 
@@ -140,3 +142,23 @@
 | record 带 `byte[]` 的相等性 | record 默认对数组做引用比较，两段内容相同的 PCM 判不等 → 去重/对拍会静默出错。`ArcadeFrame` 已显式覆写 `equals/hashCode` | `ArcadeFrameTest.roundTrip` |
 | Boot 4 没有 `WebClient.Builder` bean | 自动配置被拆成独立 starter，当前依赖组合下不存在 → 启动即 `UnsatisfiedDependency`。改为 `WebClient.builder().build()` | 启动测试 |
 | log4j `PatternLayout.Builder.setPattern` | Boot 4 管的 log4j 2.25.5 只有 `withPattern`（已弃用但可用） | 编译错误 |
+| `Mono.fromFuture(null)` | 会变成**空完成**而不是发出 null；`petGate()` 用 null 表示放行，导致 200 无 body。用 `Optional` 承载 | `NoriEndpointsTest` |
+| reactor-netty `headers()` 回调 | 给的是 **Netty** 的 `HttpHeaders`，不是 Spring 的；多值头要 `set(name, values)` | 编译错误 |
+| Spring 7 无 `HandshakeHandler` | 服务端不再"回选"子协议；浏览器容忍，Netty 客户端不容忍（JDK 客户端可以） | `ArcadeWebSocketProxyTest` |
+
+## Q14 · 媒体出口只允许一个，新连接会顶掉旧连接
+
+- **位置**：`gateway.MediaHub#register`
+- **现象**：同一时刻只保留最近注册的 media 连接，旧连接被"顶掉"（不主动关闭，只是不再推帧）。
+- **初步判断**：单用户单窗口场景下这是**对的**——两路同时推帧会让客户端收到交错的 seq，
+  听起来像卡带，其实两路混在一起。但如果前端因为重连短暂开了两条，后开的会把能用的那条顶掉。
+- **怎么定论**：录一次「刷新页面」的完整会话，看 media 连接数与帧是否连贯。
+
+## Q15 · 上游若也发媒体帧，seq 会冲突
+
+- **位置**：`gateway.ArcadeWebSocketProxy`（转发上游帧）↔ `SessionRuntime#speak`（生成帧）
+- **现象**：我们生成的帧 seq 由 `SpeechFramer` 从 0 起；上游若也推二进制帧，它带的是**上游自己的 seq**，
+  两路混进同一个媒体连接，客户端按 seq 排序就会乱。
+- **初步判断**：golden 三轮里上游一个二进制帧都没发过（103 帧全是我们代理组装的），
+  所以当前实现是对的；但这是**实测的空白区**，不能当成契约保证。
+- **怎么定论**：在 media 通道上统计"上游 s2c 二进制帧"的数量；若长期为 0，就在代码里显式丢弃并记一次 WARN。
