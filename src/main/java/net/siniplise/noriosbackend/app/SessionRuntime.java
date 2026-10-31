@@ -1,11 +1,15 @@
 package net.siniplise.noriosbackend.app;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import net.siniplise.noriosbackend.contract.ArcadeFrame;
 import net.siniplise.noriosbackend.lifecycle.LifecycleMachine;
+import net.siniplise.noriosbackend.persona.PersonaClient;
+import net.siniplise.noriosbackend.persona.ScriptLineWrite;
 import net.siniplise.noriosbackend.runtime.SessionLoop;
 import net.siniplise.noriosbackend.script.ScriptEngine;
 import net.siniplise.noriosbackend.script.ScriptTable;
@@ -39,6 +43,7 @@ public final class SessionRuntime implements AutoCloseable {
     private final TtsClient tts;
     private final MediaSinkProvider media;
     private final ScriptEngine script;
+    private final PersonaClient persona;
 
     /** 一次回复内的帧序号发生器；换回复就换一个（chunkId 归零）。 */
     private SpeechFramer framer = new SpeechFramer(UUID.randomUUID(), UUID.randomUUID());
@@ -52,8 +57,14 @@ public final class SessionRuntime implements AutoCloseable {
     }
 
     public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media, ScriptTable table) {
+        this(name, tts, media, table, null);
+    }
+
+    public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media,
+                          ScriptTable table, PersonaClient persona) {
         this.tts = tts;
         this.media = media;
+        this.persona = persona;
         this.script = new ScriptEngine(table);
         this.loop = new SessionLoop(name);
         this.lifecycle = new LifecycleMachine();
@@ -112,11 +123,16 @@ public final class SessionRuntime implements AutoCloseable {
      *
      * @return 本次入队的台词条数
      */
+    /** 一条 fact 在会话线程内的处理结果：入队句数 + 需要写给人格侧的记录。 */
+    private record FactResult(int queued, List<ScriptLineWrite> writes) {
+    }
+
     public CompletableFuture<Integer> onFact(String fact) {
         return onLoop(() -> {
             lifecycle.observeFact(fact);
             var fires = script.onFact(fact, System.currentTimeMillis());
             int queued = 0;
+            List<ScriptLineWrite> writes = new ArrayList<>();
             for (var fire : fires) {
                 for (int i = 0; i < fire.lines().size(); i++) {
                     speech.enqueue(new SpeechQueue.Line(
@@ -124,11 +140,32 @@ public final class SessionRuntime implements AutoCloseable {
                             fire.lines().get(i), fire.beat().emotion()));
                     queued++;
                 }
+                // 首次带 memory（建卡）；repeatable 的后续触发只上屏（transient）
+                if (fire.writeMemory()) {
+                    writes.add(ScriptLineWrite.firstTime(fire.beat().id(), fire.beat().emotion(),
+                            fire.lines(), fire.memory(), fire.memoryImportance()));
+                } else if (fire.beat().repeatable() && !fire.lines().isEmpty()) {
+                    writes.add(ScriptLineWrite.repeatOnly(fire.beat().id(), fire.beat().emotion(),
+                            fire.lines()));
+                }
             }
             if (queued > 0) {
                 log.debug("script: fact={} 命中 {} 条 beat，入队 {} 句", fact, fires.size(), queued);
             }
-            return queued;
+            return new FactResult(queued, List.copyOf(writes));
+        }).thenApply(result -> {
+            // 记忆写入是旁路：失败只记日志，绝不影响已经入队的台词
+            if (persona != null) {
+                for (ScriptLineWrite write : result.writes()) {
+                    persona.writeScriptLine(write)
+                            .onErrorResume(e -> {
+                                log.warn("script: 记忆写入失败 beat={}（旁路）: {}", write.beat(), e.toString());
+                                return Mono.empty();
+                            })
+                            .subscribe();
+                }
+            }
+            return result.queued();
         });
     }
 
