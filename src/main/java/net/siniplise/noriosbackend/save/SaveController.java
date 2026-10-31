@@ -48,6 +48,18 @@ public class SaveController {
                 .defaultIfEmpty(Map.of("ok", false, "reason", "empty-or-corrupt"));
     }
 
+    /** 读档：把槽位里的状态恢复进当前会话。 */
+    @PostMapping("/{slot}/load")
+    public Mono<Map<String, Object>> load(@PathVariable int slot) {
+        var game = store.load(slot);
+        if (game.isEmpty()) {
+            return Mono.just(Map.of("ok", false, "reason", "empty-or-corrupt"));
+        }
+        return Mono.fromFuture(session.restoreFrom(game.get()))
+                .map(ignored -> Map.<String, Object>of("ok", true, "slot", slot,
+                        "savedAt", game.get().savedAt()));
+    }
+
     /** 写一个槽位：从当前会话 + 台词状态现场组一份。 */
     @PostMapping("/{slot}")
     public Mono<Map<String, Object>> save(@PathVariable int slot) {

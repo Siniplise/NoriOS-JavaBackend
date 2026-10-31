@@ -169,6 +169,22 @@ public final class SpeechQueue {
         return dropped;
     }
 
+    /**
+     * 从存档恢复待播队列。
+     *
+     * <p>只恢复 `pending`，不恢复 `current`：读档时"正在播的那句"已经不存在了
+     * （客户端也早就没在播），把它塞回去只会让队列卡在第一句永远等 ack。
+     */
+    public void restore(List<Line> pendingLines, long restoredEpoch) {
+        guard.assertOwner();
+        pending.clear();
+        if (pendingLines != null) {
+            pending.addAll(pendingLines);
+        }
+        current = null;
+        epoch = Math.max(epoch, restoredEpoch);
+    }
+
     /** 硬清空（`resetStory` 这类场景）。 */
     public void clearAll() {
         guard.assertOwner();

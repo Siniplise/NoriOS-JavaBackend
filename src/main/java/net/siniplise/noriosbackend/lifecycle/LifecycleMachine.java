@@ -149,6 +149,23 @@ public final class LifecycleMachine {
         return null;
     }
 
+    /**
+     * 从存档恢复（会话线程内调用一次）。
+     *
+     * <p>整份替换：存档就是"那一刻的事实"，与内存里的残留合并只会得到第三种状态。
+     */
+    public void restore(String phase, String cartridge, boolean ended, long seq, java.util.Collection<String> factsIn) {
+        guard.assertOwner();
+        this.phase = phase == null || phase.isBlank() ? "idle" : phase;
+        this.cartridge = cartridge;
+        this.ended = ended;
+        this.seq = seq;
+        this.facts.clear();
+        if (factsIn != null) {
+            this.facts.addAll(factsIn);
+        }
+    }
+
     /** 不可变快照，可跨线程传。 */
     public Snapshot snapshot() {
         guard.assertOwner();

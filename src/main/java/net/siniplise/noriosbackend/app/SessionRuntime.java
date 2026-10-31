@@ -198,6 +198,76 @@ public final class SessionRuntime implements AutoCloseable {
         });
     }
 
+    /**
+     * 观察一条服务端帧（WS 文本帧）。**只读解析，不参与转发**。
+     *
+     * <p>这里承担「换局」的落地：`cartridge_unmounted` 到达后
+     * ① 软清空语音队列（当前句说完、其余丢弃）；
+     * ② 只有真的丢了东西才通报人格（`/game-note`，只记不答）。
+     * 条件通报很关键——每退出一次就往记忆里塞一条"被截断"，她的记忆会被噪音填满。
+     *
+     * @return 是否发生了换局（ended 由 false 变 true）
+     */
+    public CompletableFuture<Boolean> observeFrame(String rawText) {
+        return onLoop(() -> {
+            boolean wasEnded = lifecycle.snapshot().ended();
+            boolean changed = lifecycle.observeFrame(rawText);
+            if (!changed || wasEnded || !lifecycle.snapshot().ended()) {
+                return false;
+            }
+            // 换局：软清空（保留正在播的那句）
+            String cart = lifecycle.snapshot().cartridge();
+            int dropped = speech.softReset();
+            if (dropped > 0 && persona != null) {
+                persona.gameNote(cart, dropped)
+                        .onErrorResume(e -> {
+                            log.warn("cartridge: 通报截断失败 cart={} dropped={}: {}", cart, dropped, e.toString());
+                            return Mono.empty();
+                        })
+                        .subscribe();
+            }
+            log.info("cartridge: 换局 cart={} 丢弃 {} 句（{}）", cart, dropped,
+                    dropped > 0 ? "已通报人格" : "队列为空，未通报");
+            return true;
+        });
+    }
+
+    /**
+     * 从存档恢复（读档）。
+     *
+     * <p><b>顺序是有讲究的</b>：`script → lifecycle → speech`。
+     * 先恢复台词闸门（否则接下来触发的 fact 会用旧闸门判断），再恢复生命周期（facts 决定 petGate），
+     * 最后塞回待播队列。反过来做的话，恢复 lifecycle 时 facts 会覆盖刚恢复的闸门状态。
+     *
+     * <p>恢复后立刻落盘一次：读档本身就该是一个新的"当前状态"，
+     * 不能等下一次 fact 触发才写。
+     */
+    public CompletableFuture<Void> restoreFrom(net.siniplise.noriosbackend.save.SaveGame game) {
+        if (game == null || !game.readableByThisVersion()) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("存档不可读"));
+        }
+        return onLoop(() -> {
+            script.restore(game.script().toSnapshot());
+            var session = game.session();
+            lifecycle.restore(session.phase(), session.cartridge(), session.ended(),
+                    session.seq(), session.facts());
+            List<SpeechQueue.Line> pending = new ArrayList<>();
+            if (game.speech() != null) {
+                for (var line : game.speech().pending()) {
+                    pending.add(new SpeechQueue.Line(line.qid(), line.qpart(), line.qof(),
+                            line.text(), line.emotion()));
+                }
+            }
+            speech.restore(pending, game.speech() == null ? 0 : game.speech().epoch());
+            if (scriptStore != null) {
+                scriptStore.save(script.snapshot());
+            }
+            log.info("session: 已读档 slot={} phase={} facts={} 待播={}",
+                    game.slot(), session.phase(), session.facts().size(), pending.size());
+            return null;
+        });
+    }
+
     /** 台词状态快照（存档用）。 */
     public CompletableFuture<net.siniplise.noriosbackend.store.ScriptStateSnapshot> scriptSnapshot() {
         return onLoop(script::snapshot);
@@ -232,11 +302,6 @@ public final class SessionRuntime implements AutoCloseable {
     /** 生命周期快照（跨线程安全）。 */
     public CompletableFuture<LifecycleMachine.Snapshot> snapshot() {
         return onLoop(lifecycle::snapshot);
-    }
-
-    /** 观察一条服务端帧（只读解析，转发不受影响）。 */
-    public CompletableFuture<Boolean> observeFrame(String rawText) {
-        return onLoop(() -> lifecycle.observeFrame(rawText));
     }
 
     /** 记录一个 fact。 */

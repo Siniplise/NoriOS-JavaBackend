@@ -27,7 +27,11 @@
 | Q18 | chat | `stream:true` 命中时回的是整段 JSON，客户端行为未验 | 中 |
 | Q19 | persona | 记忆写入是 fire-and-forget，停机时可能丢在途请求 | 低 |
 | Q20 | save | 存档里的 `bundle` 现在是 `unknown`（没做启动探测） | 低 |
-| Q21 | save | 存档只存，暂无"读档恢复会话"的路径 | 中 |
+| Q21 | save | ~~存档只存不读~~ → 已补 `restoreFrom`（结案） | — |
+| Q22 | cartridge | `gesture.*` 只在点开游戏时发一次，重开同一游戏是否重发未验 | 中 |
+| Q23 | cartridge | `runtimes.state` 字段语义未知，未使用 | 低 |
+| Q24 | cartridge | 多开窗口时 cartridgeId 会互相覆盖（单会话假设） | 低 |
+| Q25 | cartridge | `boot.completed` 与 `cartridge_unmounted` 的先后顺序未验 | 中 |
 
 ---
 
@@ -219,3 +223,30 @@
   顺序错了会互相覆盖。这属于"半步做完"，必须显式记下来，别让人以为已经闭环。
 - **怎么定论/怎么改**：`SessionRuntime.restoreFrom(SaveGame)`，在会话线程里按
   `script → lifecycle → speech` 的顺序恢复，并立刻落盘一次。
+
+## 卡带相关（详见 docs/CARTRIDGE.md §7）
+
+### Q22 · `gesture.*` 是否只在"点开游戏"时发一次
+
+- **位置**：前端 `NormalApp` 的 QfrDock（`public/assets/NormalApp-*.js`）
+- **现象**：四个 `gesture.<id>` fact 写死在 bundle 里；不确定重复点开同一游戏会不会重发。
+- **初步判断**：若不重发，`gesture_*` beat 实际是"一次性"——与"每次玩都该说一句"的产品预期不符。
+- **怎么定论**：录一次"开象棋 → 退出 → 再开象棋"，看 WS 上行有没有第二条 `gesture.chess`。
+
+### Q23 · `runtimes.state` 未使用
+
+- **位置**：`world_joined.mountedCartridges[].runtimes[].state`
+- **现象**：协议给了形状没给字段语义，我们完全没用。
+- **初步判断**：将来要在管理器里显示"当前局面"时才需要；现在接管它只会增加耦合面。
+
+### Q24 · 多开窗口互相覆盖
+
+- **位置**：`app.SessionConfig`（单会话单例）+ `gateway.MediaHub`（单出口）
+- **现象**：第二个窗口会把第一个的 cart / 音频出口顶掉。
+- **初步判断**：本地单用户单窗口的既定假设；真要多会话，先从 `SessionRuntime` 拆起。
+
+### Q25 · `boot.completed` 与 `cartridge_unmounted` 的先后
+
+- **位置**：`script.resetStory`（挂 `boot.completed`）↔ `SessionRuntime#observeFrame`（挂 unmount）
+- **现象**：退出后立刻开新游戏时，两者可能交错：软清空把新局刚入队的台词也清掉。
+- **怎么定论**：录一次"退出 → 立刻开新游戏"，看新的台词有没有被丢掉。

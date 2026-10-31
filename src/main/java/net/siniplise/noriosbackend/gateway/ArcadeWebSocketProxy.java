@@ -59,12 +59,15 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
     private final URI upstream;
     private final HttpClient httpClient;
     private final MediaHub mediaHub;
+    private final net.siniplise.noriosbackend.app.SessionRuntime session;
 
-    public ArcadeWebSocketProxy(ObjectProvider<ConfigLoader.Loaded> configProvider, MediaHub mediaHub) {
+    public ArcadeWebSocketProxy(ObjectProvider<ConfigLoader.Loaded> configProvider, MediaHub mediaHub,
+                                net.siniplise.noriosbackend.app.SessionRuntime session) {
         ConfigLoader.Loaded loaded = configProvider.getIfAvailable(ConfigLoader::load);
         this.upstream = URI.create(loaded.config().upstreams().gameExe());
         this.httpClient = HttpClient.create();
         this.mediaHub = mediaHub;
+        this.session = session;
         log.info("gateway: WS 反代目标 {}", upstream);
     }
 
@@ -105,6 +108,14 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
                     Mono<Void> down = browser.send(
                             inbound.receiveFrames()
                                     .handle((frame, sink) -> {
+                                        // 旁路观察：只读，不阻塞转发；异常一律吞掉，绝不能影响帧流
+                                        if (frame instanceof TextWebSocketFrame text && session != null) {
+                                            session.observeFrame(text.text())
+                                                    .exceptionally(e -> {
+                                                        log.debug("ws: 生命周期观察失败: {}", e.toString());
+                                                        return false;
+                                                    });
+                                        }
                                         WebSocketMessage message = toBrowserMessage(browser, frame);
                                         if (message != null) {
                                             sink.next(message);
