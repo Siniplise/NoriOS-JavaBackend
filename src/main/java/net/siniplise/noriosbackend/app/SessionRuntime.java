@@ -7,6 +7,8 @@ import java.util.UUID;
 import net.siniplise.noriosbackend.contract.ArcadeFrame;
 import net.siniplise.noriosbackend.lifecycle.LifecycleMachine;
 import net.siniplise.noriosbackend.runtime.SessionLoop;
+import net.siniplise.noriosbackend.script.ScriptEngine;
+import net.siniplise.noriosbackend.script.ScriptTable;
 import net.siniplise.noriosbackend.speech.MediaSink;
 import net.siniplise.noriosbackend.speech.MediaSinkProvider;
 import net.siniplise.noriosbackend.speech.SpeechQueue;
@@ -36,17 +38,23 @@ public final class SessionRuntime implements AutoCloseable {
     private final SpeechQueue speech;
     private final TtsClient tts;
     private final MediaSinkProvider media;
+    private final ScriptEngine script;
 
     /** 一次回复内的帧序号发生器；换回复就换一个（chunkId 归零）。 */
     private SpeechFramer framer = new SpeechFramer(UUID.randomUUID(), UUID.randomUUID());
 
     public SessionRuntime(String name) {
-        this(name, null, null);
+        this(name, null, null, ScriptTable.empty());
     }
 
     public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media) {
+        this(name, tts, media, ScriptTable.empty());
+    }
+
+    public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media, ScriptTable table) {
         this.tts = tts;
         this.media = media;
+        this.script = new ScriptEngine(table);
         this.loop = new SessionLoop(name);
         this.lifecycle = new LifecycleMachine();
         this.speech = new SpeechQueue();
@@ -55,6 +63,7 @@ public final class SessionRuntime implements AutoCloseable {
             loop.submit(() -> {
                 lifecycle.ownedByCurrentThread();
                 speech.ownedByCurrentThread();
+                script.ownedByCurrentThread();
                 return null;
             }).join();
         } catch (RuntimeException e) {
@@ -93,6 +102,47 @@ public final class SessionRuntime implements AutoCloseable {
                     return sent;
                 })))
                 .toFuture();
+    }
+
+    /**
+     * 一个 fact 到达：跑台词引擎，把命中的台词入队（供 `/nori-line` 取走）。
+     *
+     * <p>只入队不上屏：上屏是客户端轮询 `/nori-line` 后自己画的。
+     * 需要发声时由调用方再用 {@link #speak} 推帧——两件事分开，才不会出现"上屏了但没声音"时无从判断是谁的问题。
+     *
+     * @return 本次入队的台词条数
+     */
+    public CompletableFuture<Integer> onFact(String fact) {
+        return onLoop(() -> {
+            lifecycle.observeFact(fact);
+            var fires = script.onFact(fact, System.currentTimeMillis());
+            int queued = 0;
+            for (var fire : fires) {
+                for (int i = 0; i < fire.lines().size(); i++) {
+                    speech.enqueue(new SpeechQueue.Line(
+                            fire.beat().id(), i, fire.lines().size(),
+                            fire.lines().get(i), fire.beat().emotion()));
+                    queued++;
+                }
+            }
+            if (queued > 0) {
+                log.debug("script: fact={} 命中 {} 条 beat，入队 {} 句", fact, fires.size(), queued);
+            }
+            return queued;
+        });
+    }
+
+    /** 新一局：清台词闸门（台词重说），保留记忆标记。 */
+    public CompletableFuture<Void> resetStory() {
+        return onLoop(() -> {
+            script.resetStory();
+            return null;
+        });
+    }
+
+    /** 观测：台词引擎已落闸的 beat 数。 */
+    public CompletableFuture<Integer> scriptDoneCount() {
+        return onLoop(script::doneCount);
     }
 
     /** 新一次回复：chunkId/seq 归零（blockId 从 0 重新数）。 */

@@ -2,6 +2,10 @@ package net.siniplise.noriosbackend.speech;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -32,8 +36,24 @@ class NoriEndpointsTest {
     private record Env(ConfigurableApplicationContext context, SessionRuntime session, String base) {
     }
 
+    /** 把测试用的台词表落到临时文件（配置层只认路径，不认 classpath）。 */
+    private static Path fixtureTable() {
+        try {
+            String json = new String(NoriEndpointsTest.class
+                    .getResourceAsStream("/script/fixture-beats.json").readAllBytes(), StandardCharsets.UTF_8);
+            Path file = Files.createTempFile("nori-beats-", ".json");
+            file.toFile().deleteOnExit();
+            Files.writeString(file, json, StandardCharsets.UTF_8);
+            return file;
+        } catch (IOException e) {
+            throw new IllegalStateException("写测试台词表失败", e);
+        }
+    }
+
     private static Env start() {
-        ConfigLoader.Loaded loaded = ConfigLoader.load().withGameExe("http://127.0.0.1:1");
+        ConfigLoader.Loaded loaded = ConfigLoader.load()
+                .withGameExe("http://127.0.0.1:1")
+                .withScriptLinesFile(fixtureTable().toString());
         SpringApplication app = NoriBackendApplication.newApplication(loaded);
         ConfigurableApplicationContext context = app.run("--server.port=0");
         String port = context.getEnvironment().getProperty("local.server.port");
@@ -90,6 +110,25 @@ class NoriEndpointsTest {
             env.session.observeFact("boot.completed").join();
             JsonNode after = get(env.base, NoriPaths.LIFESTAT);
             assertThat(after.get("petGate").isNull()).as("过场结束后放行").isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("摸头真的触发台词：入队 → /nori-line 能取到；再摸一次换下一句（轮换）")
+    void touchFiresScriptLines() {
+        Env env = start();
+        try (env.context) {
+            JsonNode first = post(env.base, NoriPaths.TOUCH, Map.of("part", "head"));
+            assertThat(first.get("queued").asInt()).as("touch_head 的 pick=1").isEqualTo(1);
+
+            JsonNode lines = get(env.base, NoriPaths.LINE);
+            assertThat(lines.at("/lines").size()).isOne();
+            assertThat(lines.at("/lines/0/qid").asString()).isEqualTo("touch_head");
+            assertThat(lines.at("/lines/0/text").asString()).isEqualTo("一……");
+
+            post(env.base, NoriPaths.TOUCH, Map.of("part", "head"));
+            JsonNode second = get(env.base, NoriPaths.LINE);
+            assertThat(second.at("/lines/0/text").asString()).as("repeatable 轮换到第二句").isEqualTo("二……");
         }
     }
 

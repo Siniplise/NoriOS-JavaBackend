@@ -61,11 +61,12 @@ public class NoriLifeController {
                 body.put("blocked", blocked);
                 return Mono.just(body);
             }
-            // 放行：写 fact（台词系统靠它触发），返回表情建议
-            return Mono.fromFuture(session.observeFact("touch." + part)).map(added -> {
+            // 放行：跑台词引擎（fact → beat → 入队），台词由客户端轮询 /nori-line 取走
+            return Mono.fromFuture(session.onFact("touch." + part)).map(queued -> {
                 body.put("fired", true);
                 body.put("fact", "touch." + part);
                 body.put("emotion", "smile");
+                body.put("queued", queued);
                 return body;
             });
         });

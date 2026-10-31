@@ -91,6 +91,16 @@ public final class ConfigLoader {
             return !unknownKeys.isEmpty();
         }
 
+        /** 换台词表路径（不动配置文件）。测试用，也方便现场临时指一份别的表。 */
+        public Loaded withScriptLinesFile(String linesFile) {
+            var sc = config.script();
+            var next = new NoriConfig(config.ports(), config.upstreams(), config.secrets(),
+                    config.llm(), config.tts(),
+                    new NoriConfig.Script(linesFile, sc.stateFile(), sc.resetOnNewRun()),
+                    config.speech(), config.touch(), config.memory(), config.save(), config.obs());
+            return new Loaded(next, effectiveJson, effectiveTree, unknownKeys, source);
+        }
+
         /** 换一个游戏上游（不动配置文件）。影子对比与网关测试都靠它换个目标。 */
         public Loaded withGameExe(String gameExe) {
             var u = config.upstreams();

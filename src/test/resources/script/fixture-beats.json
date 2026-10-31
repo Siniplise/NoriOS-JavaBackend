@@ -1,0 +1,43 @@
+{
+  "beats": [
+    {
+      "id": "once_beat",
+      "label": "一次性：进桌面",
+      "act": 1,
+      "when": ["boot.completed"],
+      "after": { "sentinel": null, "delayMs": 1200 },
+      "emotion": "happy",
+      "lineGapMs": 0,
+      "lines": ["欢迎回来。"]
+    },
+    {
+      "id": "touch_head",
+      "label": "可重复：摸头（轮换）",
+      "act": 0,
+      "when": ["touch.head"],
+      "after": { "sentinel": null, "delayMs": 0 },
+      "emotion": "shy",
+      "lineGapMs": 0,
+      "repeatable": true,
+      "pick": 1,
+      "lines": ["一……", "二……", "三……"],
+      "memory": "他摸了摸我的头。",
+      "memoryImportance": 0.9
+    },
+    {
+      "id": "memory_only",
+      "label": "只记不说",
+      "act": 3,
+      "when": ["arg.seal_released"],
+      "lines": [],
+      "memory": "封印解除了。"
+    },
+    {
+      "id": "empty_beat",
+      "label": "空词条：等填词",
+      "act": 3,
+      "when": ["cult.unpacked"],
+      "lines": []
+    }
+  ]
+}
