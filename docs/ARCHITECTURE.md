@@ -213,3 +213,61 @@ net.siniplise.noriosbackend
 
 验收基线（[H] §9）：同一浏览器、同一存档，新旧两栈录制的帧序列差异为 0，
 `/nori-line` 返回一致，TTS 首帧延迟不劣于旧栈。
+
+---
+
+## 日志与可观测性（开发期原则：宁可吵死，不要安静）
+
+> 2026-10-31 用户定：**"满屏 ERROR/FATAL 比一点动静没有更安心，至少知道哪有问题。"**
+
+背景很实在：这一天为了"她完全不动"，排查了两轮——最后发现是一个
+`ArrayNode.asString()` 异常被 `catch` 成 **debug**，而 root level 是 INFO，
+于是日志里**一行报错都没有**。功能悄悄失效比崩溃难查一百倍。
+
+### 一、级别怎么选（严格按语义，别随手用）
+
+| 级别 | 什么时候用 | 例子 |
+|---|---|---|
+| **CRTL**（`log.error(Critical.CRITICAL, …)`） | **代码 bug**：重试也不会好。必须带堆栈 | 帧处理抛未预期异常、转换失败、驱动内部异常 |
+| **ERROR** | 可恢复的失败，但功能受损 | 上游 502、写库失败（有重试/降级） |
+| **WARN** | 降级但不影响主流程 | 旁路观察失败（笔画少记一段、生命周期判定漏一次） |
+| **INFO** | 状态变化与关键节点 | 挂载、轮到她、发出指令 |
+| **DEBUG** | 高频细节 | 每帧记账、攒笔画 |
+
+### 二、开发期把包全开 DEBUG
+
+`log4j2.xml`：
+
+```xml
+<Logger name="net.siniplise" level="DEBUG" additivity="false">
+    <AppenderRef ref="CONSOLE"/>
+</Logger>
+<Root level="INFO">…</Root>
+```
+
+- 只管**我们自己的包**，第三方（reactor/netty）仍是 INFO，不会刷屏。
+- production 删掉这个 logger 即可。
+
+### 三、前端通信入口一律兜底
+
+`obs/logging/FatalGuard` 统一兜底，任何 `Throwable` 都记成 **CRTL** 并明确写
+"已隔离、本次数据丢弃、连接/会话继续"——避免读日志的人误以为进程要挂。
+
+已覆盖的入口：
+
+| 入口 | 兜底方式 |
+|---|---|
+| `SessionRuntime.observeFrame`（下行帧总入口） | `FatalGuard.call` 包整个处理体 |
+| `SessionRuntime.observeUpstreamFrame`（上行帧） | 同上 + `exceptionally` |
+| `ArcadeWebSocketProxy` 下行 `handle` | 观察走 `FatalGuard.run`；**转换失败记 CRTL 后丢帧**（不断连接） |
+| `ArcadeWebSocketProxy` 上行 `handle` | 同上 |
+| `GameDriverService.observe` 的调用点 | CRTL（驱动异常都是 bug） |
+
+### 四、三条教训（都踩过）
+
+1. **`catch` 里只打 debug ≈ 没打**。要么 ERROR/WARN，要么别 catch。
+2. **异步入 future 的异常会被丢掉**。`observeFrame` 返回 `CompletableFuture`，
+   光在调用处 try/catch 抓不到——必须 `.exceptionally`。
+3. **"关掉时不打日志"是设计缺陷**。功能未启用和功能坏掉，在外部看起来一模一样。
+   所以开关状态、是否收到第一帧、每次跳过判定的**原因**，都要有日志。
+

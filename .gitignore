@@ -3,6 +3,10 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
+#WorkBuddy记忆
+
+.workbuddy/
+
 # IDE
 .idea/
 *.iml
@@ -15,6 +19,8 @@ out/
 local.properties
 _local_key.txt
 *.env
+idea_nori
+idea_nori.pub
 
 # 本机覆盖配置（含本机绝对路径，不入库；默认值在 src/main/resources/config/）
 /config/nori-backend.json

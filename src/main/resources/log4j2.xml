@@ -27,6 +27,17 @@
     </Appenders>
 
     <Loggers>
+        <!--
+          ★ 开发期：我们自己的包全开 DEBUG（2026-10-31 用户要求）。
+            理由很实在：出问题时"日志一片安静"比"满屏报错"难查一百倍——
+            这一天就因为一个被吞成 debug 的异常，排查了整整两轮。
+            副作用是吵；production 关掉这一行即可（Root 仍是 INFO，第三方不会刷屏）。
+
+          用 additivity="false" 避免同一条日志被本 logger 和 Root 各输出一次。
+        -->
+        <Logger name="net.siniplise" level="DEBUG" additivity="false">
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
         <Root level="INFO">
             <AppenderRef ref="CONSOLE"/>
         </Root>

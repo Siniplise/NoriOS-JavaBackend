@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nori 管理台</title>
+<style>
+  /* 深色为主：管理台通常在 IDE 旁边开着，跟深色主题一起用不刺眼 */
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --ok: #4ade80;
+    --bad: #f87171;
+    --warn: #fbbf24;
+    --accent: #7c9cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  .pill {
+    padding: 3px 10px; border-radius: 999px; font-size: 12px;
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  }
+  .pill b { color: var(--text); font-weight: 600; }
+  main { padding: 20px 22px 60px; max-width: 1180px; margin: 0 auto; }
+  section { margin-bottom: 26px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 13px 15px;
+  }
+  .card .name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .card .val { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; word-break: break-all; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(74,222,128,.5); }
+  .dot.bad { background: var(--bad); box-shadow: 0 0 8px rgba(248,113,113,.5); }
+  .dot.warn { background: var(--warn); }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; overflow: auto; max-height: 460px; margin: 0;
+    font: 12.5px/1.55 "Cascadia Code", Consolas, monospace;
+    color: #c9d1e0;
+  }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 13px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
+  .kv { display: grid; grid-template-columns: 180px 1fr; gap: 4px 14px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-family: "Cascadia Code", Consolas, monospace; color: #c9d1e0; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Nori 管理台</h1>
+  <span class="pill">game <b id="port-game">—</b></span>
+  <span class="pill">admin <b id="port-admin">—</b></span>
+  <span class="pill">驱动 <b id="driver-state">—</b></span>
+  <span class="spacer"></span>
+  <span class="pill" id="updated">尚未刷新</span>
+  <button id="refresh">刷新</button>
+</header>
+
+<main>
+
+  <section>
+    <h2>上游健康</h2>
+    <div class="grid" id="health"></div>
+    <div class="hint">「连得上」即视为运行中 —— 根路径 404 只说明没有页面，不代表服务没起。</div>
+  </section>
+
+  <section>
+    <h2>驱动与节奏（启动参数）</h2>
+    <dl class="kv" id="runtime"></dl>
+    <div class="hint">
+      这些是 JVM 系统属性，改了要重启。
+      例：<code>-Dnori.game.driver=on -Dnori.game.stepMs=2200 -Dnori.game.think.chess=2600</code>
+    </div>
+  </section>
+
+  <section>
+    <h2>存档</h2>
+    <table>
+      <thead><tr><th>槽位</th><th>保存时间</th><th>阶段</th><th>大小</th></tr></thead>
+      <tbody id="saves"><tr><td colspan="4" class="empty">加载中…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>生效中的配置</h2>
+    <pre id="config">加载中…</pre>
+    <div class="hint" id="config-meta"></div>
+  </section>
+
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function getJson(url) {
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function cardHTML(item) {
+  const ok = item.up;
+  return `<div class="card">
+    <div class="name">${item.name}</div>
+    <div class="val"><span class="dot ${ok ? 'ok' : 'bad'}"></span>${ok ? '运行中' : '连不上'}</div>
+    <div class="sub">${item.url}<br>${item.ms}ms · ${item.note}</div>
+  </div>`;
+}
+
+async function loadHealth() {
+  try {
+    const h = await getJson('/api/admin/health');
+    $('health').innerHTML = h.upstreams.map(cardHTML).join('');
+  } catch (e) {
+    $('health').innerHTML = `<div class="card"><div class="val"><span class="dot bad"></span>探测失败</div>
+      <div class="sub">${e.message}</div></div>`;
+  }
+}
+
+async function loadRuntime() {
+  try {
+    const r = await getJson('/api/admin/runtime');
+    $('driver-state').textContent = r.driver === 'on' ? '开' : '关';
+    $('port-game').textContent = r.ports?.game ?? '—';
+    $('port-admin').textContent = r.ports?.admin ?? '—';
+    const keys = Object.entries(r.properties || {});
+    $('runtime').innerHTML = keys.length
+      ? keys.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')
+      : '<dt>—</dt><dd>没有任何 nori.* 参数</dd>';
+  } catch (e) {
+    $('runtime').innerHTML = `<dt>错误</dt><dd>${e.message}</dd>`;
+  }
+}
+
+async function loadConfig() {
+  try {
+    const c = await getJson('/api/admin/config');
+    $('config').textContent = JSON.stringify(c, null, 2);
+  } catch (e) {
+    $('config').textContent = '读取失败：' + e.message;
+  }
+  try {
+    const m = await getJson('/api/admin/config/meta');
+    $('config-meta').innerHTML = `来源：<code>${m.source}</code>` +
+      (m.unknownKeys && m.unknownKeys.length ? ` · 未识别字段：<code>${m.unknownKeys.join(', ')}</code>` : '');
+  } catch (_) { /* meta 拿不到不影响主配置 */ }
+}
+
+async function loadSaves() {
+  try {
+    const s = await getJson('/api/admin/saves');
+    const list = Array.isArray(s) ? s : (s.saves || []);
+    if (!list.length) {
+      $('saves').innerHTML = '<tr><td colspan="4" class="empty">还没有存档</td></tr>';
+      return;
+    }
+    // 字段与 FileSaveStore.SlotInfo 对齐：slot / savedAt / phase / bytes
+    $('saves').innerHTML = list.map(x => `<tr>
+      <td>${x.slot ?? '-'}</td>
+      <td>${x.savedAt ?? '-'}</td>
+      <td>${x.phase ?? '-'}</td>
+      <td>${fmtBytes(x.bytes)}</td>
+    </tr>`).join('');
+  } catch (e) {
+    $('saves').innerHTML = `<tr><td colspan="4" class="empty">读取失败：${e.message}</td></tr>`;
+  }
+}
+
+function fmtBytes(n) {
+  if (typeof n !== 'number' || n < 0) return '-';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1024 / 1024).toFixed(2) + ' MB';
+}
+
+function refreshAll() {
+  loadHealth();
+  loadRuntime();
+  loadConfig();
+  loadSaves();
+  $('updated').textContent = '更新于 ' + new Date().toLocaleTimeString();
+}
+
+$('refresh').onclick = refreshAll;
+refreshAll();
+// 5 秒自动刷一次健康；配置/存档不刷（避免打断你正在看的内容）
+setInterval(loadHealth, 5000);
+</script>
+</body>
+</html>

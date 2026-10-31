@@ -29,8 +29,14 @@ public class GatewayWebSocketConfig {
         return mapping;
     }
 
+    /**
+     * 用**自定义**的握手服务替换默认实现。
+     *
+     * <p>默认的 {@code new WebSocketHandlerAdapter()} 不会回选子协议，浏览器会因此直接关闭连接
+     * （详见 {@link SubProtocolHandshakeService} 的类注释）。
+     */
     @Bean
     public WebSocketHandlerAdapter webSocketHandlerAdapter() {
-        return new WebSocketHandlerAdapter();
+        return new WebSocketHandlerAdapter(new SubProtocolHandshakeService());
     }
 }

@@ -7,7 +7,6 @@ assertj = "3.27.7"
 slf4j = "2.0.20"
 sqlite = "3.54.1.0"
 springBoot = "4.1.2"
-
 [libraries]
 # 测试
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }

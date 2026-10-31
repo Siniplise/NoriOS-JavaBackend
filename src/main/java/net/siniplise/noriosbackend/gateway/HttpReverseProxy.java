@@ -72,8 +72,10 @@ public class HttpReverseProxy implements WebFilter, Ordered {
         if (isWebSocketUpgrade(exchange.getRequest())) {
             return chain.filter(exchange);
         }
-        // 管理端与 Boot 错误页放行给下游 handler
-        if (path.startsWith("/api/admin") || path.equals("/error")) {
+        // 管理端与 Boot 错误页放行给下游 handler。
+        // `/admin` 是管理网页本体（2026-10-31 加）：不放行的话它会被转发给上游 exe 而 404。
+        if (path.startsWith("/api/admin") || path.equals("/admin")
+                || path.startsWith("/admin/") || path.equals("/error")) {
             return chain.filter(exchange);
         }
         // 自有端点交给注解控制器；没实现的会自然 404（比 501 更贴近"路径不存在"的真相）

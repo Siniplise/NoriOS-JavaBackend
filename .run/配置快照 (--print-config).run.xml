@@ -6,7 +6,6 @@
     <module name="nori-backend" />
     <option name="PROGRAM_PARAMETERS" value="--print-config" />
     <option name="VM_PARAMETERS" value="-Dfile.encoding=UTF-8 -Djava.net.useSystemProxies=false" />
-    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

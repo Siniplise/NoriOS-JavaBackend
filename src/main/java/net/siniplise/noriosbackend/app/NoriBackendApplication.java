@@ -100,6 +100,12 @@ public class NoriBackendApplication {
         log.info("tunables: tts.parallel={} speech.dedupeMs={} speech.fallbackMs={} petGate={}",
                 cfg.tts().parallel(), cfg.speech().dedupeMs(), cfg.speech().fallbackMs(),
                 cfg.touch().gateEnabled());
+        // ★ 这一行是"属性到底有没有传进 JVM"的唯一判据，必须在 main 里打：
+        //   显示 <未设置> ⇒ IDEA 的 -D 没生效（常见是把 VM options 写进了 Program arguments）；
+        //   显示 on ⇒ 属性到了，那问题就在会话层；显示 off ⇒ 显式关掉了。
+        //   如果连这行日志都看不到 ⇒ 跑的不是这份代码（没重新 build / 没重启）。
+        log.info("driver: nori.game.driver={}（<未设置> 表示 -D 没传进 JVM）",
+                System.getProperty("nori.game.driver", "<未设置>"));
     }
 
     private static void checkJdk() {

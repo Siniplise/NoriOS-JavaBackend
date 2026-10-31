@@ -55,7 +55,9 @@ public class SessionConfig {
 
     @Bean
     public SessionRuntime sessionRuntime(TtsClient tts, MediaHub media, ScriptTable table,
-                                         PersonaClient persona, ScriptStateStore scriptStore) {
-        return new SessionRuntime("main", tts, media, table, persona, scriptStore);
+                                         PersonaClient persona, ScriptStateStore scriptStore,
+                                         net.siniplise.noriosbackend.gateway.UpstreamChannels upstream,
+                                         net.siniplise.noriosbackend.game.GameBrain gameBrain) {
+        return new SessionRuntime("main", tts, media, table, persona, scriptStore, upstream, gameBrain);
     }
 }

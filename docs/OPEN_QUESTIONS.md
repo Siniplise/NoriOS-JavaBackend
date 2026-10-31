@@ -226,18 +226,50 @@
 
 ## 卡带相关（详见 docs/CARTRIDGE.md §7）
 
-### Q22 · `gesture.*` 是否只在"点开游戏"时发一次
+### Q22 · `gesture.*` 是否只在"点开游戏"时发一次 —— ✅ 已结案（原假设**被推翻**）
 
 - **位置**：前端 `NormalApp` 的 QfrDock（`public/assets/NormalApp-*.js`）
-- **现象**：四个 `gesture.<id>` fact 写死在 bundle 里；不确定重复点开同一游戏会不会重发。
-- **初步判断**：若不重发，`gesture_*` beat 实际是"一次性"——与"每次玩都该说一句"的产品预期不符。
-- **怎么定论**：录一次"开象棋 → 退出 → 再开象棋"，看 WS 上行有没有第二条 `gesture.chess`。
+- **原假设（错）**：前端点开游戏 → `emitFact('gesture.<id>')` → WS 上行 → 我们 `observeFact`。
+- **实测证据**（录制 `golden/20261031-035029`，Chrome 驱动真机）：
+  1. `dispatch{cmd:{type:"startGame"}}` 返回的 `runtime_transition.patches` **只有 `/gameState` 和 `/settings`**，
+     **没有 `/facts`** —— 客户端在开一局时根本不写任何 fact。
+  2. 全 bundle 里 `gesture.*` 只出现 2 处，**全是只读**：
+     - `NormalApp`：`Wtt` 常量 + `Ox(oT, …)` 监听 → 弹 toast
+     - `QfrDock`：`gesturesDone: {kind:"countTrue", of:[…4], cap:4, labels:{…}}` 计数器
+     **零处写入。**
+  3. `cakeduel` 的 `cartridge_mounted.runtimes[0].state` 里**没有 `facts` 字段** —— 游戏卡带不持有 fact。
+  4. toast 文案（i18n `os.gestureWarning`）：**「交互模块负载超限」「已复现 {{done}}/{{total}}」**，
+     sfx `arg-gesture-warning-toast`，labels 为「国际象棋/森林寻宝/你画我猜/蛋糕对决」。
+- **真相**：`gesture.*` 是**我们自己后端注入**的（`NoriOSNew/nori_game.js` → `fireGesture` → `injectFact`），
+  注入走 `event{channel:"manifold.dev.jump.request", payload:{facts:[id]}}`，
+  由 **manifold.web（ARG）卡带**落库，客户端只负责读出来计数。
+- **触发条件（已在 `_t_gesture.js` 固化，共 14 条用例）**：
+  | fact | 判据 |
+  |---|---|
+  | 全部 | **前置门控** `hasFact('qfr.installed')`（玩家先装 QFR-9000），否则一律跳过 |
+  | `gesture.chess` | `capture` 事件里**她的车吃我的后**（`by=她`、`from.piece='r'`、`captured.piece='q'`） |
+  | `gesture.codenames` | 她**连续 3 次**踩到浆果（`guess{by:'agent',result:'bystander'}` ×3） |
+  | `gesture.pictionary` | 她猜出的词**精确等于「水母」**（"水母灯"/"水母伞"都不算） |
+  | `gesture.cakeduel` | 狼爵士（`wolfy`）被弃进阻挡堆；另有 `wolfy_taunt` / `game_ended` 兜底 |
+  | `arg.gestures_complete` | 四枚集齐后 **1.2s** 再补一发 |
+- **对我们代码的影响（重要）**：
+  1. `gesture_*` **不能**挂在 `cartridge_mounted` 上（那是"打开游戏"，与判据无关）。
+  2. `gesture_*` **不能**做成 repeatable —— 它靠 `hasFact` + `BEAT_TRIES`(≤12 次 / 8s 节流) 约束，语义是**剧情节点**。
+  3. **"每玩一局该说一句"要用另一个锚点**：`dispatch{cmd:"startGame"}` 的
+     `runtime_transition.events[]` —— chess 是**平铺** `{type:"game_start"}`，
+     cakeduel 是**嵌套** `{type:"engine", event:{type:"game_started"}}`。**两种封装并存，必须都认。**
+  4. 真正产出 `gesture.*` 的 `NoriOSNew/nori_game.js`（2230 行）**尚未移植** —— 见 Q26。
 
-### Q23 · `runtimes.state` 未使用
+### Q23 · `runtimes.state` 未使用 —— 已实测出结构（仍不接管）
 
 - **位置**：`world_joined.mountedCartridges[].runtimes[].state`
-- **现象**：协议给了形状没给字段语义，我们完全没用。
-- **初步判断**：将来要在管理器里显示"当前局面"时才需要；现在接管它只会增加耦合面。
+- **实测结构**（`golden/20261031-035029`）：
+  - `chess`：`{settings:{playerSide,difficulty,locale}, gameState:{fen,pgn,turn,phase,status,fullMoveNumber,…}, drawOffer…}`
+  - `cakeduel`：`{config:null, game:null, settings:{difficulty,roundsToWin,seed}, tutorial:null, lastError:null}`
+  - `manifold.web`：`{facts:{…}, operations:{…}}` ← **唯一带 facts 的卡带**
+  - `chat`：`{operations:{…}}`
+- **结论**：**游戏卡带不持有 `facts`**，`gesture.*` 只可能落在 manifold.web 的 facts 里。
+  我们仍然**不接管** `state`（判据靠 `runtime_transition`，见 Q22），只把它当调试快照。
 
 ### Q24 · 多开窗口互相覆盖
 
@@ -250,3 +282,166 @@
 - **位置**：`script.resetStory`（挂 `boot.completed`）↔ `SessionRuntime#observeFrame`（挂 unmount）
 - **现象**：退出后立刻开新游戏时，两者可能交错：软清空把新局刚入队的台词也清掉。
 - **怎么定论**：录一次"退出 → 立刻开新游戏"，看新的台词有没有被丢掉。
+
+### Q26 · `nori_game.js`（2230 行）尚未移植 —— **最大缺口**
+
+- **位置**：`NoriOSNew/nori_game.js` → Java 侧**没有对应包**
+- **现象**：现有 `lifecycle`/`script` 只处理"换局 + 台词"，**完全没有游戏内逻辑**。
+  实测 `cakeduel` 开局后上游产出 `chat.agentMessage`「唔...开局啦，Nori 先把牌捏紧一点。」——
+  这句**不是 `/nori-line`**（全程 `{"lines":[]}`），而是 **chat 卡带的 `runtime_transition`**。
+- **它到底做什么**（`GameSession` 类骨架）：
+  | 职责 | 方法 |
+  |---|---|
+  | 四游戏 AI 决策 | `kickChess()` / `cakeTick()` / `picKick()` / `sdTick()`+`sdGuess()` |
+  | 大脑调用 | `BRAIN_URL = http://127.0.0.1:25503/game-turn`（**这就是 25503 的真正用途**） |
+  | 台词 | `say()` → `onLine` → `/nori-line`；`onCommentary` 旁白 |
+  | 剧情判定 | `checkEvents()` → `fireGesture()` → `injectFact()` |
+  | 你画我猜取图 | `strokeAscii()` / `strokePng()`（自己手写 PNG 编码器 `encodePngRgb`） |
+  | 事件归一 | `flatEvent(e)` —— 把 chess 的平铺 `{type:"game_start"}` 与 cakeduel 的嵌套 `{type:"engine",event:{…}}` 抹平 |
+- **初步判断**：必须移植，但**分层来**：先 `flatEvent` + `checkEvents` + `fireGesture`（剧情判定，纯函数、可离线测），
+  再 `BRAIN_URL` 客户端，最后四个游戏的 AI 循环。
+- **怎么定论**：`_t_gesture.js` 的 14 条用例可以直接当 Java 单测的验收标准。
+
+### Q27 · 同一条 transition 被广播 N 次（连接数）
+
+- **位置**：`gateway/ArcadeWebSocketProxy` 的上行解析
+- **现象**：实测同一时刻有 4 条 WS 连接（`conn 133/744/1374/1379`）。
+  一条 `runtime_transition` / `cartridge_mounted` / `cartridge_unmounted` / `visibility_fence_advanced`
+  会被上游**复制 N 份**（每连接一份），只有 `*_ack` 发回发起方。
+- **风险**：若按消息逐条驱动 `checkEvents`/`fireGesture`/`say`，**会重复 N 次**（同一句话播 3 遍）。
+- **初步判断**：必须按 `(worldId, cartridgeId, version)` 去重（同一 version 的 transition 只处理一次）；
+  `cartridge_unmounted` 无 version，按 `(worldId, cartridgeId, 时间窗)` 去重。
+- **怎么定论**：录制里同一 transition 出现 3 次已复现，加去重后再跑一遍确认只处理 1 次。
+
+### Q28 · 两条平行的"说话"通道
+
+- **位置**：`speech/NoriLineController`（`/nori-line` 轮询）↔ 上游 `chat` 卡带的 `agentMessage`
+- **现象**：
+  1. `/nori-line` —— 客户端约 706ms（实测 270~350ms 双组交错）**轮询**，全程 `{"lines":[]}`；
+  2. `chat.runtime_transition{type:"agent_message", messageId:"msg_7", content:"唔...开局啦…"}`
+     —— **上游 LLM 直接产出**，带真实游戏上下文。
+- **初步判断**：`agentMessage` 是**上游的能力**，反代只需**透传**（绝不改写）；
+  `/nori-line` 是**我们自己**（25503）的通道，用于"我们编排的台词"（`ScriptEngine`）。
+  **两者互不替代，也不能互相去重** —— 但要避免同一句同时从两条通道出现（见 Q22 第 3 条：锚点要错开）。
+- **怎么定论**：抓一次完整对局，统计两条通道各自的产出条数与时间点是否重叠。
+
+### Q29 · `noai` 版**有** arcade —— 原判断是错的，作废
+
+> ⚠️ **2026-10-31 更正**：以下原结论已被推翻，保留仅为记录教训。
+
+- **原结论（错）**：`Nori.Web.noai.exe` 只是静态服务器、没有 `/api/arcade/web/v1`，
+  所以整条链不通。
+- **错在哪**：
+  1. 用 `curl` 带 `Upgrade` 头去探 WS 端点，**探不出真相**——普通 GET 会落到 HTTP 路由返回 404，
+     而真正的握手走的是 upgrade 分支。`/health`、`/arcade/web/v1` 返回 `index.html`
+     也只是 SPA 兜底，不代表没有 WS。
+  2. 当时**真正的故障是 Q31（我们没回选子协议）**，我却把日志里的
+     `AbortedException` 归因给了上游。而 `nori_proxy.js` 那条链同时也在失败，
+     是因为我给它的请求同样没有合法 ticket，它对上游失败就 `socket hang up`。
+- **事实**：`noai` 是 `Nori.Web.clean.exe` 的改名版——**同一个 build**，
+  只是把 `DEFAULT_UNLOCKED_FACTS` 那 41 个常量（`boot.completed` / `session.ready` / `arg.*` / `qfr.*`）
+  挖成了 `zzfact00..zzfact40`，好让 ColdOpen 能触发。**arcade 服务完整存在**，
+  `proxy.log` 里 `FACT + zzfact00.......` `GAME mount cid=manifold.web` `dispatch_ack` 都是它产的。
+- **正确的判别方式**：
+  - 看 `NoriOSNew/proxy.log` 有没有 `WS up /api/arcade/web/v1 proto=arcade.v1` 和后续 `FACT +`；
+  - 或者直接用浏览器打开 4173，能走 ColdOpen 就说明上游健康。
+  - **不要**用 curl 探 WS 端点下结论。
+- **另一个坑（用户当场纠正）**：页面上显示的**「连接中断」「四个连接失败」是 ARG 的演出内容**，
+  不是故障。本项目是「侵入现实解密」——客户端会**故意**模拟断线/报错来推进叙事。
+- **判别原则（用户定，2026-10-31）**：
+  > **真故障会留下硬证据（HTTP 404/403/502、白屏、`ERR_CONNECTION_REFUSED`），
+  > ARG 叙事只留下精心设计的文案。**
+
+  | 现象 | 倾向 | 怎么定 |
+  |---|---|---|
+  | 只有风格化文案（「连接中断」「四个连接失败」），布局/美术正常 | **叙事** | 等演完；看后台日志有没有正常帧流 |
+  | 带 **HTTP 状态码**的失败、白屏、连接被拒 | **真故障** | 按码查：404=路由/上游缺端点，403=准入(ticket/Origin)，502=上游不可达 |
+  | Network 面板有红色请求 + 状态码 | **真故障** | **以状态码为准，不信页面文案** |
+
+  排查顺序固定：**先看 Network 面板的状态码，再看页面文案。**
+- **启动方式**：`NoriOSNew/nori_start_all.bat`（用户指定以此脚本为准），
+  它启动 `Nori.Web.noai.exe` 到 4174 + `nori_proxy.js` 到 4173。
+
+
+### Q30 · 主动注入通道 —— 原结论被推翻，改为 `Flux.merge`（待真机确认）
+
+- **位置**：`gateway/ArcadeWebSocketProxy`
+- **原结论（错）**：`WebsocketOutbound` 只接受一个出站序列，`Flux.merge` 与二次
+  `sendObject().subscribe()` 都会 `AbortedException`。
+- **错在哪**：那两次实验是在 **Q31（子协议未回选）** 期间做的。当时**纯透传也一样报**
+  `AbortedException` —— 也就是说这个错误跟"怎么拼出站流"根本无关，是浏览器握手即断。
+  **教训：依赖本身是坏的时候，对照实验的结论要打问号。**
+- **现在的写法**：
+  ```java
+  Flux<WebSocketFrame> fromBrowser = browser.receive().<WebSocketFrame>handle(...);
+  Flux<WebSocketFrame> toUpstream = injected == null
+          ? fromBrowser : Flux.merge(fromBrowser, injected.asFlux());
+  Mono<Void> up = outbound.sendObject(toUpstream).then();
+  ```
+  注入侧是一个 `Sinks.many().unicast()`，`tryEmitNext` 进同一条出站流；
+  `doFinally` 里 `unregister` + `tryEmitComplete`。
+- **仍然成立的那半条**：**确实只能有一个出站序列**。所以必须 merge，不能另开订阅。
+- **待确认**：真机上注入一帧后，透传是否仍然正常、帧序有没有被打乱。
+  验证方法：装 `qfr.installed` 后打一局象棋，用"她的车吃我的后"，看
+  `game: 手势注入 gesture.chess` 是否出现、且同时 `dispatch_ack` 还正常回流。
+
+### Q31 · Spring WebFlux 不回选子协议 ⇒ 浏览器直接断开（已结案）
+
+- **位置**：`gateway/SubProtocolHandshakeService` + `GatewayWebSocketConfig`
+- **现象**：从 4183 打开前端，永远停在「正在连接 FUTURUM」；后端日志是
+  `AbortedException: Connection has been closed BEFORE send operation`
+  ——**看着像上游连不上，实际上游没参与**。
+- **判据（3 秒定位）**：
+  ```
+  node tools/diag_ws.js ws://127.0.0.1:4183/api/arcade/web/v1
+  → Server sent no subprotocol
+  ```
+- **根因**：Spring WebFlux 的 `HandshakeWebSocketService` 不提供选协议钩子，
+  默认**不回** `Sec-WebSocket-Protocol` 响应头。浏览器请求了子协议、服务端一个都不选时，
+  按 RFC 6455 会**直接判握手失败并关闭连接**。浏览器一断，我们那条 `sendObject`
+  就在发送前发现连接没了 —— 于是错误指向了毫不相干的上游。
+- **为什么旧栈没这问题**：`nori_proxy.js` 用 `wss.handleUpgrade`，会自动回选。
+- **修法**：继承 `HandshakeWebSocketService`，覆盖 `handleRequest`：
+  优先回 `arcade.v1`（不在第一个也照样选它），否则退回客户端列表第一个；
+  客户端没请求就不发该头。然后在 `GatewayWebSocketConfig` 里
+  `new WebSocketHandlerAdapter(new SubProtocolHandshakeService())`。
+- **验证**：IDEA 启动后日志出现 `media: 已注册音频出口` 与
+  `lifecycle: 离开游戏 cart=chess ⇒ ended`，说明 WS 与帧流都通了。
+
+
+### Q32 · 帧流驱动：我们是"事后驱动"，不是"扣动作"
+
+- **位置**：`game/driver/GameDriverService` + `ChessDriver` + `GameHeads`
+- **与 JS 的根本差别**：
+  - `nori_game.js` **扣住**玩家的那一步（先不发上游），等算出她的应对再一起发
+    ⇒ 所以它需要 `simCakeduelAfterPlayerAction` 这类"相位推测"。
+  - 我们的代理是**纯透传**：玩家的动作早就发给上游了，等上游把新局面广播回来，
+    才看到"轮到她" ⇒ 我们**不需要推测相位**（上游已经告诉我们了）。
+- **代价**：她的这一步比 JS 版晚一个往返。对回合制游戏可接受。
+- **为什么刻意不扣动作**：扣住意味着要接管帧序与 ack，一旦出错就是"玩家点了没反应"——
+  那比"她慢半拍"严重得多。
+- **两个防呆（都是正确性要求，不是优化）**：
+  1. **同一 version 只问一次**：上游按连接数广播多份（Q27），我们也会重连——不去重她会连走三步。
+  2. **没有 headVersion 就不发**：`expectedHeadVersion` 不对时上游**静默丢弃**（不报错、不回 ack），
+     "她为什么不动"会变成查不出原因的谜。`GameHeads` 从 `runtime_transition.version`
+     和 `dispatch_ack.headVersion` 两处记账，且**只升不降**（防广播乱序把 head 拉回去）。
+- **dispatch 报文以实测为准**：`{type, actor:"agent", cartridgeId, requestId, expectedHeadVersion, cmd}`
+  —— **没有 worldId**（不要多加）。
+- **开关**：默认**关闭**，`-Dnori.game.driver=on` 打开。理由：这条链路会替她往上游发命令，
+  判断错就是"我们污染了对局"。默认关掉，让它在真机上被显式打开、被观察。
+- **报文形状两者不同（容易漏）**：玩家发的 dispatch **不带** `worldId` / `visibilityFenceId`；
+  **agent 发的要带**（依据 `nori_game.js#sendAgent`）。我们两个来源各写各的。
+- **当前覆盖**：
+  | 卡带 | 触发点 | 状态 |
+  |---|---|---|
+  | `chess` | 下行 transition 里 `/gameState` 的 `turn` | ✅ 已接 |
+  | `pictionary` | **上行** `submitStrokeBatch`（玩家画一笔） | ✅ 已接 |
+  | `cakeduel` / `codenames` | 下行 transition | ⬜ 待接 |
+- **为什么你画我猜要单独走上行**：笔画是玩家的**上行命令**，上游不会为它广播局面，
+  等 transition 她永远不会动。所以要给 `browser.receive()` 加旁路观察
+  （`SessionRuntime.observeUpstreamFrame`），攒进 `PictionaryBoard` 后**直接**触发一次看图。
+  去抖 700ms（玩家还在画时看图，猜出来必然是半成品）。
+- **⚠️ 真机未验证**：单测覆盖了开关/去重/报文形状/非法动作，但"打一局象棋看她的子会不会动"
+  还没做过。第一次开的时候重点看两件事：
+  1. 日志有没有 `game: 轮到她 cart=chess ... head=N`；
+  2. 有没有 `game: 已 发出 chess → {type=move...}`，且页面上盘面真的变了。

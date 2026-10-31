@@ -9,6 +9,8 @@ import java.util.List;
 import net.siniplise.noriosbackend.config.ConfigLoader;
 import net.siniplise.noriosbackend.contract.NoriPaths;
 import net.siniplise.noriosbackend.speech.MediaSink;
+import net.siniplise.noriosbackend.obs.logging.Critical;
+import net.siniplise.noriosbackend.obs.logging.FatalGuard;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -20,6 +22,7 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.WebsocketClientSpec;
 import reactor.netty.http.websocket.WebsocketInbound;
@@ -60,14 +63,17 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
     private final HttpClient httpClient;
     private final MediaHub mediaHub;
     private final net.siniplise.noriosbackend.app.SessionRuntime session;
+    private final UpstreamChannels channels;
 
     public ArcadeWebSocketProxy(ObjectProvider<ConfigLoader.Loaded> configProvider, MediaHub mediaHub,
-                                net.siniplise.noriosbackend.app.SessionRuntime session) {
+                                net.siniplise.noriosbackend.app.SessionRuntime session,
+                                UpstreamChannels channels) {
         ConfigLoader.Loaded loaded = configProvider.getIfAvailable(ConfigLoader::load);
         this.upstream = URI.create(loaded.config().upstreams().gameExe());
         this.httpClient = HttpClient.create();
         this.mediaHub = mediaHub;
         this.session = session;
+        this.channels = channels;
         log.info("gateway: WS 反代目标 {}", upstream);
     }
 
@@ -105,6 +111,25 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
                     WebsocketInbound inbound = (WebsocketInbound) conn.inbound();
                     WebsocketOutbound outbound = (WebsocketOutbound) conn.outbound();
 
+                    // ── 主动注入通道 ────────────────────────────────────────────────
+                    // 用途：超限手势那四枚 fact 必须由代理**主动发一帧**给上游（客户端不发）。
+                    // 做法：把注入帧并进**同一个**出站序列（WebsocketOutbound 只接受一个出站流，
+                    // 另开一次 sendObject().subscribe() 会与透传的那条打架）。
+                    //
+                    // ★ 只对业务通道开放：媒体通道发文本帧没有意义，它自己已是音频出口。
+                    // ★ 早期这里被判为"不可用"，是因为当时**子协议没回选**——浏览器握手即断，
+                    //   纯透传也报 AbortedException。子协议修好后（见 SubProtocolHandshakeService）
+                    //   才能公平地评估这个写法。
+                    final Sinks.Many<WebSocketFrame> injected = path.startsWith(NoriPaths.WS_MEDIA)
+                            ? null
+                            : Sinks.many().unicast().onBackpressureBuffer();
+                    final UpstreamChannels.Channel channel = injected == null
+                            ? null
+                            : text -> injected.tryEmitNext(new TextWebSocketFrame(text)).isSuccess();
+                    if (channel != null) {
+                        channels.register(channel);
+                    }
+
                     Mono<Void> down = browser.send(
                             inbound.receiveFrames()
                                     .handle((frame, sink) -> {
@@ -112,7 +137,7 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
                                         if (frame instanceof TextWebSocketFrame text && session != null) {
                                             session.observeFrame(text.text())
                                                     .exceptionally(e -> {
-                                                        log.debug("ws: 生命周期观察失败: {}", e.toString());
+                                                        log.warn("ws: 生命周期观察失败（不影响转发）: {}", e.toString());
                                                         return false;
                                                     });
                                         }
@@ -121,17 +146,42 @@ public class ArcadeWebSocketProxy implements WebSocketHandler {
                                             sink.next(message);
                                         }
                                     }));
+
+                    // 浏览器上行（`browser.receive()` 全流程只订阅这一次）
+                    Flux<WebSocketFrame> fromBrowser = browser.receive()
+                            .<WebSocketFrame>handle((message, sink) -> {
+                                WebSocketFrame frame;
+                                try {
+                                    frame = toUpstreamFrame(message);
+                                } catch (Throwable t) {
+                                    log.error(Critical.CRITICAL,
+                                            "ws: 上行帧转换失败（这一帧被丢弃，玩家操作可能没生效）", t);
+                                    return;
+                                }
+                                if (frame != null) {
+                                    // 旁路观察**上行**文本帧：你画我猜的笔画只在这里出现
+                                    // （服务端不回传"这张画长什么样"）。只读，失败不影响转发。
+                                    if (frame instanceof TextWebSocketFrame text && session != null) {
+                                        FatalGuard.run("ws 上行观察", () -> session.observeUpstreamFrame(text.text()));
+                                    }
+                                    sink.next(frame);
+                                }
+                            });
+                    // 单源 = 浏览器上行；有注入时把两条并成一条（merge 保持各自内部顺序）
+                    Flux<WebSocketFrame> toUpstream = injected == null
+                            ? fromBrowser
+                            : Flux.merge(fromBrowser, injected.asFlux());
+
                     // sendObject 负责把 WebSocketFrame 交给 WS 编码器；send() 只收 ByteBuf，不能用
-                    Mono<Void> up = outbound.sendObject(
-                            browser.receive()
-                                    .handle((message, sink) -> {
-                                        WebSocketFrame frame = toUpstreamFrame(message);
-                                        if (frame != null) {
-                                            sink.next(frame);
-                                        }
-                                    })).then();
+                    Mono<Void> up = outbound.sendObject(toUpstream).then();
                     // 任一方向结束就收整条连接：半开的 WS 会让对端以为还活着
-                    return Mono.when(down, up).doFinally(signal -> conn.dispose());
+                    return Mono.when(down, up).doFinally(signal -> {
+                        if (channel != null) {
+                            channels.unregister(channel);
+                            injected.tryEmitComplete();
+                        }
+                        conn.dispose();
+                    });
                 })
                 .doFinally(signal -> {
                     if (registered != null) {

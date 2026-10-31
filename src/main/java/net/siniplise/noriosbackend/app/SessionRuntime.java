@@ -3,11 +3,14 @@ package net.siniplise.noriosbackend.app;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 import net.siniplise.noriosbackend.contract.ArcadeFrame;
+import net.siniplise.noriosbackend.game.GestureFacts;
+import net.siniplise.noriosbackend.game.GestureRuntime;
+import net.siniplise.noriosbackend.gateway.UpstreamChannels;
 import net.siniplise.noriosbackend.lifecycle.LifecycleMachine;
+import net.siniplise.noriosbackend.obs.logging.Critical;
+import net.siniplise.noriosbackend.obs.logging.FatalGuard;
 import net.siniplise.noriosbackend.persona.PersonaClient;
 import net.siniplise.noriosbackend.persona.ScriptLineWrite;
 import net.siniplise.noriosbackend.runtime.SessionLoop;
@@ -22,6 +25,8 @@ import net.siniplise.noriosbackend.tts.TtsClient;
 import reactor.core.publisher.Mono;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * 一个会话的运行时：把「串行执行器 + 生命周期 + 台词队列」绑在一起。
@@ -46,6 +51,17 @@ public final class SessionRuntime implements AutoCloseable {
     private final ScriptEngine script;
     private final PersonaClient persona;
     private final ScriptStateStore scriptStore;
+    private final GestureRuntime gesture;
+    /** 帧流驱动：该她动的时候替她问大脑并发指令。默认关闭（见类注释）。 */
+    private final net.siniplise.noriosbackend.game.driver.GameDriverService driver;
+    /** 你画我猜的画布：笔畫面只存在于**上行**命令里，服务端不回传，只能自己攒。 */
+    private final net.siniplise.noriosbackend.game.pictionary.PictionaryBoard picBoard =
+            new net.siniplise.noriosbackend.game.pictionary.PictionaryBoard();
+
+    private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
+    /** 当前 worldId（从 {@code world_joined} / 各消息里带下来），手势去重要用。 */
+    private String worldId;
 
     /** 一次回复内的帧序号发生器；换回复就换一个（chunkId 归零）。 */
     private SpeechFramer framer = new SpeechFramer(UUID.randomUUID(), UUID.randomUUID());
@@ -69,6 +85,19 @@ public final class SessionRuntime implements AutoCloseable {
 
     public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media,
                           ScriptTable table, PersonaClient persona, ScriptStateStore scriptStore) {
+        this(name, tts, media, table, persona, scriptStore, null);
+    }
+
+    public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media,
+                          ScriptTable table, PersonaClient persona, ScriptStateStore scriptStore,
+                          UpstreamChannels upstream) {
+        this(name, tts, media, table, persona, scriptStore, upstream, null);
+    }
+
+    public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media,
+                          ScriptTable table, PersonaClient persona, ScriptStateStore scriptStore,
+                          UpstreamChannels upstream,
+                          net.siniplise.noriosbackend.game.GameBrain brain) {
         this.tts = tts;
         this.media = media;
         this.persona = persona;
@@ -77,12 +106,36 @@ public final class SessionRuntime implements AutoCloseable {
         this.loop = new SessionLoop(name);
         this.lifecycle = new LifecycleMachine();
         this.speech = new SpeechQueue();
-        // 把两个状态机的所有权交给 loop 线程；之后的任何访问都必须在 loop 内
+        // 手势注入器：没有上游通道时退化为"只判定、不注入"（日志会喊，方便发现装配漏了）
+        UpstreamChannels.InjectorHolder holder = new UpstreamChannels.InjectorHolder(upstream);
+        this.gesture = new GestureRuntime(holder::inject,
+                fact -> lifecycle.snapshot().facts().contains(fact));
+        this.driver = new net.siniplise.noriosbackend.game.driver.GameDriverService(
+                brain, holder,
+                // 把任务送回 loop：大脑的回复在 reactor 线程到达，改状态必须回会话线程
+                task -> loop.submit(() -> { task.run(); return null; }));
+        // 画布要在 driver 里也能读到（上行观察写入、驱动读取）
+        this.driver.setPictureBoard(this.picBoard);
+        // 她打牌时顺口说的话，走和台词引擎同一条队列（这样 /nori-line 能取到、也会被 TTS 念出来）
+        this.driver.setOnSpoken(reply -> {
+            var lines = reply.lines();
+            if (lines.isEmpty()) {
+                return;
+            }
+            // qid 要唯一：ack（/nori-spoken）按它回报，重复会让上一句被提前标记成已播
+            String qid = "game-" + UUID.randomUUID().toString().substring(0, 8);
+            for (int i = 0; i < lines.size(); i++) {
+                speech.enqueue(new SpeechQueue.Line(qid, i, lines.size(), lines.get(i), reply.emotion()));
+            }
+            log.info("game: 她的台词入队 {} 句（emotion={}）", lines.size(), reply.emotion());
+        });
+        // 把三个状态机的所有权交给 loop 线程；之后的任何访问都必须在 loop 内
         try {
             loop.submit(() -> {
                 lifecycle.ownedByCurrentThread();
                 speech.ownedByCurrentThread();
                 script.ownedByCurrentThread();
+                gesture.ownedByCurrentThread();
                 // 启动即恢复上次的台词闸门：否则重启后所有一次性 beat 会重说一遍
                 if (scriptStore != null) {
                     script.restore(scriptStore.load());
@@ -128,6 +181,10 @@ public final class SessionRuntime implements AutoCloseable {
                 .toFuture();
     }
 
+    /** 一条 fact 在会话线程内的处理结果：入队句数 + 需要写给人格侧的记录。 */
+    private record FactResult(int queued, List<ScriptLineWrite> writes) {
+    }
+
     /**
      * 一个 fact 到达：跑台词引擎，把命中的台词入队（供 `/nori-line` 取走）。
      *
@@ -136,10 +193,6 @@ public final class SessionRuntime implements AutoCloseable {
      *
      * @return 本次入队的台词条数
      */
-    /** 一条 fact 在会话线程内的处理结果：入队句数 + 需要写给人格侧的记录。 */
-    private record FactResult(int queued, List<ScriptLineWrite> writes) {
-    }
-
     public CompletableFuture<Integer> onFact(String fact) {
         return onLoop(() -> {
             lifecycle.observeFact(fact);
@@ -201,20 +254,42 @@ public final class SessionRuntime implements AutoCloseable {
     /**
      * 观察一条服务端帧（WS 文本帧）。**只读解析，不参与转发**。
      *
-     * <p>这里承担「换局」的落地：`cartridge_unmounted` 到达后
-     * ① 软清空语音队列（当前句说完、其余丢弃）；
-     * ② 只有真的丢了东西才通报人格（`/game-note`，只记不答）。
+     * <p>这里承担两件事：
+     * <ol>
+     *   <li><b>游戏事件</b>：喂给 {@link GestureRuntime} 判四枚超限手势（Q22）。</li>
+     *   <li><b>换局</b>：`cartridge_unmounted` 到达后 ① 软清空语音队列（当前句说完、其余丢弃）；
+     *       ② 只有真的丢了东西才通报人格（`/game-note`，只记不答）。</li>
+     * </ol>
      * 条件通报很关键——每退出一次就往记忆里塞一条"被截断"，她的记忆会被噪音填满。
+     *
+     * <p><b>顺序</b>：先喂 lifecycle（facts 会更新，`qfr.installed` 门控要用），再判手势。
+     * 反过来会让"这一帧刚到、她刚装上 QFR"的那枚 fact 被旧快照拦下。
      *
      * @return 是否发生了换局（ended 由 false 变 true）
      */
     public CompletableFuture<Boolean> observeFrame(String rawText) {
-        return onLoop(() -> {
+        // ★ 兜底：这是**所有下行帧的总入口**，里面任何未预期异常都会让"她不动/台词不出"，
+        //   而调用方（WS 转发）只关心"别断连接"。不兜底的话异常会被 future 吞掉 —— 静默。
+        return onLoop(() -> FatalGuard.call("observeFrame（下行帧处理）", () -> {
             boolean wasEnded = lifecycle.snapshot().ended();
             boolean changed = lifecycle.observeFrame(rawText);
+            dispatchGame(rawText);
+            if (driver != null) {
+                // 驱动自己管记账（heads/playerSide）与开关，异常一律吞掉：一条脏帧不能打断帧流
+                try {
+                    driver.observe(rawText);
+                } catch (RuntimeException e) {
+                    // ★ 这里用 CRTL 而不是 warn/debug：驱动里的异常都是**代码 bug**（不是网络问题），
+                    //   而且后果是"她完全不动"。之前吞成 debug 导致排查了两轮，绝不再犯。
+                    log.error(Critical.CRITICAL,
+                            "game: 驱动观察失败（她这一帧不会动）—— 这是代码 bug，不是网络问题", e);
+                }
+            }
             if (!changed || wasEnded || !lifecycle.snapshot().ended()) {
                 return false;
             }
+            // 换局：画布也要清（否则新一局会带着上一局的画去猜）
+            picBoard.reset();
             // 换局：软清空（保留正在播的那句）
             String cart = lifecycle.snapshot().cartridge();
             int dropped = speech.softReset();
@@ -229,7 +304,197 @@ public final class SessionRuntime implements AutoCloseable {
             log.info("cartridge: 换局 cart={} 丢弃 {} 句（{}）", cart, dropped,
                     dropped > 0 ? "已通报人格" : "队列为空，未通报");
             return true;
+        }, false));
+    }
+
+    /**
+     * 观察一条**上行**帧（浏览器 → 上游）。
+     *
+     * <p>只有你画我猜需要它：玩家的笔画是通过 `submitStrokeBatch` 命令发上去的，
+     * 而服务端的 `gameState` 里**没有"这张画长什么样"**——要喂图给视觉模型，只能自己攒。
+     *
+     * <p><b>性能</b>：上行帧在玩家画画时很密（每秒几十帧）。这里先用一次便宜的
+     * {@code contains} 预筛（在 reactor 线程做，不进 loop），只有笔画帧才排进会话线程。
+     * 否则会给串行的 loop 塞进大量无关任务，连累下行帧的处理。
+     *
+     * <p>**不返回结果**：观察是旁路，失败也不能影响转发。
+     */
+    public void observeUpstreamFrame(String rawText) {
+        if (rawText == null || rawText.length() < 16) {
+            return;
+        }
+        // 上行命令里有两类我们需要旁路记下：
+        //   · submitStrokeBatch —— 你画我猜的笔画（服务端不回传"这张画长什么样"）
+        //   · submitClue        —— 森林寻宝的提示词（gameState 里**没有**，history 开局又为空）
+        boolean isStroke = rawText.contains("submitStrokeBatch");
+        boolean isClue = rawText.contains("submitClue");
+        if (!isStroke && !isClue) {
+            return;
+        }
+        onLoop(() -> FatalGuard.call("observeUpstreamFrame（上行帧处理）", () -> {
+            JsonNode msg;
+            try {
+                msg = MAPPER.readTree(rawText);
+            } catch (RuntimeException e) {
+                log.warn("pic: 上行帧不是合法 JSON，丢弃: {}", rawText.length() > 120
+                        ? rawText.substring(0, 120) + "…" : rawText);
+                return null;
+            }
+            if (isStroke) {
+                JsonNode batch = strokeBatchOf(msg);
+                if (batch != null) {
+                    picBoard.addBatch(batch);
+                    log.debug("pic: 已攒 {} 笔", picBoard.strokeCount());
+                    // 笔画到达就直接考虑"她要不要猜"，不等上游广播（笔画是上行命令，未必触发 transition）
+                    if (driver != null) {
+                        driver.pictureChanged();
+                    }
+                }
+            }
+            if (isClue && driver != null) {
+                JsonNode clue = clueOf(msg);
+                if (clue != null) {
+                    JsonNode w = clue.get("word");
+                    JsonNode c = clue.get("count");
+                    if (w != null && !w.isNull() && !w.isArray() && !w.isObject()) {
+                        driver.noteClue(w.asString(),
+                                (c != null && c.isNumber()) ? c.asInt() : 1);
+                    }
+                }
+            }
+            return null;
+        }, null)).exceptionally(e -> {
+            // FatalGuard 已经吃掉了 Throwable，走到这里基本只剩"loop 被关掉"这类调度问题
+            log.error(Critical.CRITICAL,
+                    "pic: 上行观察调度失败（这张画的笔画会缺一段）", e);
+            return null;
         });
+    }
+
+    /**
+     * 从上行消息里挖出 {@code clue} 对象（{@code {word, count}}）。
+     *
+     * <p>兼容 `{cmd:{type:"submitClue", clue:{…}}}` 和 `{type:"submitClue", clue:{…}}` 两种封装——
+     * 和 {@link #strokeBatchOf} 同样的理由：玩家命令的封装方式没有文档，两个位置都找。
+     */
+    private static JsonNode clueOf(JsonNode msg) {
+        if (msg == null || !msg.isObject()) {
+            return null;
+        }
+        JsonNode cmd = msg.get("cmd");
+        if (cmd != null && cmd.isObject()) {
+            JsonNode c = cmd.get("clue");
+            if (c != null && c.isObject()) {
+                return c;
+            }
+        }
+        JsonNode c = msg.get("clue");
+        return (c != null && c.isObject()) ? c : null;
+    }
+
+    /**
+     * 从上行消息里挖出 {@code batch}（你画我猜的笔画）。
+     *
+     * <p>兼容两种封装：`{type:"dispatch", cmd:{type:"submitStrokeBatch", batch:[…]}}`
+     * 和直接 `{type:"submitStrokeBatch", batch:[…]}`。玩家命令的封装方式我们没有文档，
+     * 所以两个位置都找——多找一处不会错，找少了整张图就永远是空的。
+     */
+    private static JsonNode strokeBatchOf(JsonNode msg) {
+        if (msg == null || !msg.isObject()) {
+            return null;
+        }
+        JsonNode cmd = msg.get("cmd");
+        if (cmd != null && cmd.isObject()) {
+            JsonNode b = cmd.get("batch");
+            if (b != null && b.isArray()) {
+                return b;
+            }
+        }
+        JsonNode b = msg.get("batch");
+        return (b != null && b.isArray()) ? b : null;
+    }
+
+    /** 供驱动/测试：当前画布。 */
+    public net.siniplise.noriosbackend.game.pictionary.PictionaryBoard pictureBoard() {
+        return picBoard;
+    }
+
+    /**
+     * 从一帧文本里挑出游戏相关消息，喂给手势判定。
+     *
+     * <p>只在 loop 线程调用。解析失败一律静默——这一层绝不能因为一条畸形帧打断帧流。
+     */
+    private void dispatchGame(String rawText) {
+        if (rawText == null || rawText.length() < 2 || rawText.charAt(0) != '{') {
+            return;
+        }
+        JsonNode node;
+        try {
+            node = MAPPER.readTree(rawText);
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (node == null || !node.isObject()) {
+            return;
+        }
+        String type = net.siniplise.noriosbackend.game.GameEvents.text(node, "type");
+        if (type == null) {
+            return;
+        }
+        // worldId：有的消息在顶层，有的裹在 world 里
+        String w = net.siniplise.noriosbackend.game.GameEvents.text(node, "worldId");
+        if (w == null) {
+            JsonNode world = node.get("world");
+            if (world != null && world.isObject()) {
+                w = net.siniplise.noriosbackend.game.GameEvents.text(world, "worldId");
+            }
+        }
+        if (w != null && !w.isEmpty()) {
+            worldId = w;
+        }
+
+        switch (type) {
+            case "runtime_transition" -> {
+                String cart = net.siniplise.noriosbackend.game.GameEvents.text(node, "cartridgeId");
+                JsonNode tr = node.get("transition");
+                if (cart == null || tr == null || !tr.isObject()) {
+                    return;
+                }
+                GestureRuntime.Outcome out = gesture.onTransition(worldId, cart, tr);
+                for (GestureRuntime.Fired f : out.fired()) {
+                    // 台词驱动的接入点：将来在这里调 script.onFact(f.fact())
+                    log.info("game: 手势命中 {} — {}", f.fact(), f.why());
+                }
+                if (out.started() || out.over()) {
+                    log.debug("game: cart={} started={} over={} 手势 {}", cart, out.started(), out.over(),
+                            gesture.progressText());
+                }
+            }
+            case "cartridge_mounted", "cartridge_unmounted" -> {
+                String cart = net.siniplise.noriosbackend.game.GameEvents.text(node, "cartridgeId");
+                gesture.setCartridge("cartridge_unmounted".equals(type) ? null : cart);
+            }
+            case "world_joined" -> {
+                // 进世界时把已挂载的卡带同步过来，免得第一帧 transition 因为 cart 为 null 被忽略
+                JsonNode world = node.get("world");
+                JsonNode mounted = world == null ? null : world.get("mountedCartridges");
+                if (mounted != null && mounted.isArray() && !mounted.isEmpty()) {
+                    String last = null;
+                    for (JsonNode mc : mounted) {
+                        String id = net.siniplise.noriosbackend.game.GameEvents.text(mc, "cartridgeId");
+                        if (id != null && !"manifold.web".equals(id) && !"chat".equals(id)) {
+                            last = id;
+                        }
+                    }
+                    if (last != null) {
+                        gesture.setCartridge(last);
+                    }
+                }
+            }
+            default -> {
+                // 其它消息与手势判定无关
+            }
+        }
     }
 
     /**
