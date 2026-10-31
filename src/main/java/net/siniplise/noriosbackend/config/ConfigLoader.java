@@ -91,6 +91,16 @@ public final class ConfigLoader {
             return !unknownKeys.isEmpty();
         }
 
+        /** 换人格服务地址（不动配置文件）。测试与影子对比都要用。 */
+        public Loaded withPersona(String personaUrl) {
+            var u = config.upstreams();
+            var next = new NoriConfig(config.ports(),
+                    new NoriConfig.Upstreams(u.gameExe(), u.legacyProxy(), u.tts(), personaUrl),
+                    config.secrets(), config.llm(), config.tts(), config.script(),
+                    config.speech(), config.touch(), config.memory(), config.save(), config.obs());
+            return new Loaded(next, effectiveJson, effectiveTree, unknownKeys, source);
+        }
+
         /** 换台词表路径（不动配置文件）。测试用，也方便现场临时指一份别的表。 */
         public Loaded withScriptLinesFile(String linesFile) {
             var sc = config.script();

@@ -25,6 +25,16 @@
       "memoryImportance": 0.9
     },
     {
+      "id": "touch_tail",
+      "label": "可重复：摸尾巴",
+      "act": 0,
+      "when": ["touch.tail"],
+      "repeatable": true,
+      "emotion": "angry",
+      "lines": ["尾巴不能乱摸……", "再摸就咬你……"],
+      "memory": "他摸了我的尾巴。"
+    },
+    {
       "id": "memory_only",
       "label": "只记不说",
       "act": 3,

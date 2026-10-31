@@ -3,6 +3,7 @@ package net.siniplise.noriosbackend.app;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import net.siniplise.noriosbackend.config.ConfigLoader;
+import net.siniplise.noriosbackend.chat.ChatGate;
 import net.siniplise.noriosbackend.gateway.MediaHub;
 import net.siniplise.noriosbackend.script.ScriptTable;
 import net.siniplise.noriosbackend.tts.TtsClient;
@@ -43,6 +44,11 @@ public class SessionConfig {
             log.error("script: 台词表解析失败 {}，以空表运行: {}", file, e.toString());
             return ScriptTable.empty();
         }
+    }
+
+    @Bean
+    public ChatGate chatGate(ScriptTable table) {
+        return new ChatGate(table);
     }
 
     @Bean
