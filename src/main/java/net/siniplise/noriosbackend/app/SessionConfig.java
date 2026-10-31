@@ -6,6 +6,7 @@ import net.siniplise.noriosbackend.config.ConfigLoader;
 import net.siniplise.noriosbackend.chat.ChatGate;
 import net.siniplise.noriosbackend.gateway.MediaHub;
 import net.siniplise.noriosbackend.persona.PersonaClient;
+import net.siniplise.noriosbackend.store.ScriptStateStore;
 import net.siniplise.noriosbackend.script.ScriptTable;
 import net.siniplise.noriosbackend.tts.TtsClient;
 import org.slf4j.Logger;
@@ -54,7 +55,7 @@ public class SessionConfig {
 
     @Bean
     public SessionRuntime sessionRuntime(TtsClient tts, MediaHub media, ScriptTable table,
-                                         PersonaClient persona) {
-        return new SessionRuntime("main", tts, media, table, persona);
+                                         PersonaClient persona, ScriptStateStore scriptStore) {
+        return new SessionRuntime("main", tts, media, table, persona, scriptStore);
     }
 }

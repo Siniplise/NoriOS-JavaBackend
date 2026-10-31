@@ -13,6 +13,7 @@ import net.siniplise.noriosbackend.persona.ScriptLineWrite;
 import net.siniplise.noriosbackend.runtime.SessionLoop;
 import net.siniplise.noriosbackend.script.ScriptEngine;
 import net.siniplise.noriosbackend.script.ScriptTable;
+import net.siniplise.noriosbackend.store.ScriptStateStore;
 import net.siniplise.noriosbackend.speech.MediaSink;
 import net.siniplise.noriosbackend.speech.MediaSinkProvider;
 import net.siniplise.noriosbackend.speech.SpeechQueue;
@@ -44,6 +45,7 @@ public final class SessionRuntime implements AutoCloseable {
     private final MediaSinkProvider media;
     private final ScriptEngine script;
     private final PersonaClient persona;
+    private final ScriptStateStore scriptStore;
 
     /** 一次回复内的帧序号发生器；换回复就换一个（chunkId 归零）。 */
     private SpeechFramer framer = new SpeechFramer(UUID.randomUUID(), UUID.randomUUID());
@@ -62,9 +64,15 @@ public final class SessionRuntime implements AutoCloseable {
 
     public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media,
                           ScriptTable table, PersonaClient persona) {
+        this(name, tts, media, table, persona, null);
+    }
+
+    public SessionRuntime(String name, TtsClient tts, MediaSinkProvider media,
+                          ScriptTable table, PersonaClient persona, ScriptStateStore scriptStore) {
         this.tts = tts;
         this.media = media;
         this.persona = persona;
+        this.scriptStore = scriptStore;
         this.script = new ScriptEngine(table);
         this.loop = new SessionLoop(name);
         this.lifecycle = new LifecycleMachine();
@@ -75,6 +83,11 @@ public final class SessionRuntime implements AutoCloseable {
                 lifecycle.ownedByCurrentThread();
                 speech.ownedByCurrentThread();
                 script.ownedByCurrentThread();
+                // 启动即恢复上次的台词闸门：否则重启后所有一次性 beat 会重说一遍
+                if (scriptStore != null) {
+                    script.restore(scriptStore.load());
+                    log.info("session: 已恢复台词状态（说过 {} 个 beat）", script.doneCount());
+                }
                 return null;
             }).join();
         } catch (RuntimeException e) {
@@ -152,6 +165,10 @@ public final class SessionRuntime implements AutoCloseable {
             if (queued > 0) {
                 log.debug("script: fact={} 命中 {} 条 beat，入队 {} 句", fact, fires.size(), queued);
             }
+            if (!fires.isEmpty() && scriptStore != null) {
+                // 只把快照交给 store：真正的磁盘 IO 在 store 的写线程里，会话线程不等
+                scriptStore.save(script.snapshot());
+            }
             return new FactResult(queued, List.copyOf(writes));
         }).thenApply(result -> {
             // 记忆写入是旁路：失败只记日志，绝不影响已经入队的台词
@@ -173,8 +190,17 @@ public final class SessionRuntime implements AutoCloseable {
     public CompletableFuture<Void> resetStory() {
         return onLoop(() -> {
             script.resetStory();
+            // 换局也要落盘：否则重启后会把已经清掉的闸门又"恢复"回来
+            if (scriptStore != null) {
+                scriptStore.save(script.snapshot());
+            }
             return null;
         });
+    }
+
+    /** 台词状态快照（存档用）。 */
+    public CompletableFuture<net.siniplise.noriosbackend.store.ScriptStateSnapshot> scriptSnapshot() {
+        return onLoop(script::snapshot);
     }
 
     /** 观测：台词引擎已落闸的 beat 数。 */
@@ -266,6 +292,10 @@ public final class SessionRuntime implements AutoCloseable {
 
     @Override
     public void close() {
+        // 先让台词状态落盘，再停循环：顺序反了会丢掉最后一次触发
+        if (scriptStore != null) {
+            scriptStore.flush();
+        }
         loop.close();
     }
 }

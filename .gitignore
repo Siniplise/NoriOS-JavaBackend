@@ -35,3 +35,6 @@ Thumbs.db
 # 注意要写成 /golden/（只匹配仓库根）——写 golden/ 会连 tools/golden/ 的源码一起忽略
 /golden/
 tools/golden/node_modules/
+
+# 运行期数据（SQLite 状态库、存档），不入库
+/data/

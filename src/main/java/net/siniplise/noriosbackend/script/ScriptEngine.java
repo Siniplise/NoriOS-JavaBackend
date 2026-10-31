@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import net.siniplise.noriosbackend.runtime.ThreadGuard;
+import net.siniplise.noriosbackend.store.ScriptStateSnapshot;
 
 /**
  * 台词引擎：fact → 该说哪几句。
@@ -146,6 +147,31 @@ public final class ScriptEngine {
         guard.assertOwner();
         done.clear();
         rotation.clear();
+    }
+
+    /** 取持久化快照（只读，不改状态）。 */
+    public ScriptStateSnapshot snapshot() {
+        guard.assertOwner();
+        return ScriptStateSnapshot.of(done, rotation, memoryWritten);
+    }
+
+    /**
+     * 恢复上次的状态（启动时调用一次）。
+     *
+     * <p>整份替换而不是合并：磁盘上的就是事实，内存里刚 new 出来的空表没有信息量。
+     * 将来若要多会话，这里要改成按 sessionId 取——现在单会话，替换最简单也最不容易错。
+     */
+    public void restore(ScriptStateSnapshot snapshot) {
+        guard.assertOwner();
+        done.clear();
+        rotation.clear();
+        memoryWritten.clear();
+        if (snapshot == null) {
+            return;
+        }
+        done.putAll(snapshot.done());
+        rotation.putAll(snapshot.rotation());
+        memoryWritten.addAll(snapshot.memoryWritten());
     }
 
     /** 观测用：说过多少个 beat。 */
